@@ -4,6 +4,7 @@ const path = require("path");
 
 const PUBLIC_DIR = path.join(__dirname, "public");
 const NOTION_VERSION = "2022-06-28";
+const DEFAULT_PASSWORD = "POLAR2026";
 
 loadEnvFile();
 
@@ -11,10 +12,10 @@ const PORT = Number(process.env.PORT || 4180);
 const CONFIG = {
   token: process.env.NOTION_TOKEN || "",
   db: {
-    requests: process.env.NOTION_DB_SOLICITUDES || "21ae3d021d1b4344b05c28c9ee7eba44",
-    brands: process.env.NOTION_DB_MARCAS || "a11d78243cd941039e27f810969f8942",
-    vendors: process.env.NOTION_DB_PROVEEDORES || "440bc180be9c486e834ea9cd264105e8",
-    users: process.env.NOTION_DB_USUARIOS || "995bf3d3093343e595e6f335a8245365",
+    requests: cleanNotionId(process.env.NOTION_DB_SOLICITUDES || "21ae3d021d1b4344b05c28c9ee7eba44"),
+    brands: cleanNotionId(process.env.NOTION_DB_MARCAS || "a11d78243cd941039e27f810969f8942"),
+    vendors: cleanNotionId(process.env.NOTION_DB_PROVEEDORES || "440bc180be9c486e834ea9cd264105e8"),
+    users: cleanNotionId(process.env.NOTION_DB_USUARIOS || "995bf3d3093343e595e6f335a8245365"),
   },
   superAdmins: [
     "eliecermadrizgarcia2@gmail.com",
@@ -23,6 +24,8 @@ const CONFIG = {
     "estefaniaalejopasante@gmail.com",
   ],
 };
+
+let usersPasswordSchemaReady = false;
 
 function loadEnvFile() {
   const file = path.join(__dirname, ".env");
@@ -49,6 +52,16 @@ function cleanEmail(value) {
 
 function plain(value) {
   return String(value || "");
+}
+
+function cleanNotionId(value) {
+  const raw = String(value || "").replace(/-/g, "");
+  const match = raw.match(/[0-9a-fA-F]{32}/);
+  return match ? match[0] : String(value || "").trim();
+}
+
+function cleanPassword(value) {
+  return String(value || "").trim();
 }
 
 function idFromName(value, existing = []) {
@@ -107,6 +120,19 @@ async function queryDatabase(databaseId) {
     cursor = data.has_more ? data.next_cursor : null;
   } while (cursor);
   return results;
+}
+
+async function ensureUsersPasswordSchema() {
+  if (usersPasswordSchemaReady) return;
+  await notion(`/databases/${CONFIG.db.users}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      properties: {
+        "Password": { rich_text: {} },
+      },
+    }),
+  });
+  usersPasswordSchemaReady = true;
 }
 
 function richText(value) {
@@ -189,6 +215,7 @@ function mapUser(page) {
     rol: String(propText(props, "Rol") || "").toLowerCase(),
     entidadId: propText(props, "Entidad ID"),
     nombre: propText(props, "Nombre"),
+    password: propText(props, "Password") || DEFAULT_PASSWORD,
     activo: propText(props, "Activo"),
     notas: propText(props, "Notas"),
   };
@@ -232,11 +259,17 @@ async function loadAll() {
   };
 }
 
-function contextFor(emailValue, users) {
+function contextFor(emailValue, users, passwordValue, requirePassword = false) {
   const email = cleanEmail(emailValue);
   if (!email) return { authorized: false, email, message: "Escribe el correo autorizado para entrar." };
-  if (CONFIG.superAdmins.includes(email)) return { authorized: true, email, role: "admin", entidadId: "", nombre: email.split("@")[0] };
   const user = users.find((x) => x.email === email && x.activo);
+  const isSuperAdmin = CONFIG.superAdmins.includes(email);
+  if (!user && !isSuperAdmin) return { authorized: false, email, message: `El correo ${email} no esta activo en Usuarios y accesos - Polar.` };
+  if (requirePassword) {
+    const expected = cleanPassword(user?.password || DEFAULT_PASSWORD);
+    if (cleanPassword(passwordValue) !== expected) return { authorized: false, email, message: "Contrasena incorrecta." };
+  }
+  if (isSuperAdmin) return { authorized: true, email, role: "admin", entidadId: user?.entidadId || "", nombre: user?.nombre || email.split("@")[0] };
   if (!user) return { authorized: false, email, message: `El correo ${email} no esta activo en Usuarios y accesos - Polar.` };
   return { authorized: true, email, role: user.rol, entidadId: user.entidadId || "", nombre: user.nombre || email };
 }
@@ -260,9 +293,9 @@ function stats(rows) {
   }, { count: 0, requested: 0, assigned: 0, pending: 0 });
 }
 
-async function payload(emailValue) {
+async function payload(emailValue, passwordValue, requirePassword = true) {
   const data = await loadAll();
-  const ctx = contextFor(emailValue, data.users);
+  const ctx = contextFor(emailValue, data.users, passwordValue, requirePassword);
   if (!ctx.authorized) return ctx;
   const activeBrands = data.brands.filter((x) => x.activo);
   const activeVendors = data.vendors.filter((x) => x.activo);
@@ -290,7 +323,7 @@ function requireRole(ctx, roles) {
 
 async function getContextFromBody(body) {
   const data = await loadAll();
-  const ctx = contextFor(body.email, data.users);
+  const ctx = contextFor(body.email, data.users, body.password, true);
   return { data, ctx };
 }
 
@@ -324,8 +357,10 @@ async function findPageId(items, id, key = "id") {
 }
 
 async function handleApi(req, res, pathname, body, query) {
-  if (pathname === "/api/bootstrap" && req.method === "GET") {
-    return sendJson(res, await payload(query.get("email")));
+  if (pathname === "/api/bootstrap" && (req.method === "GET" || req.method === "POST")) {
+    const emailValue = req.method === "GET" ? query.get("email") : body.email;
+    const passwordValue = req.method === "GET" ? query.get("password") : body.password;
+    return sendJson(res, await payload(emailValue, passwordValue, true));
   }
 
   if (pathname === "/api/requests" && req.method === "POST") {
@@ -335,7 +370,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "POST",
       body: JSON.stringify({ parent: { database_id: CONFIG.db.requests }, properties: requestProps(body.request || {}, ctx) }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/requests/update" && req.method === "POST") {
@@ -348,7 +383,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ properties: requestProps({ ...current, ...(body.request || {}) }, ctx, true) }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/requests/advance" && req.method === "POST") {
@@ -358,7 +393,7 @@ async function handleApi(req, res, pathname, body, query) {
     if (!current) throw new Error("Solicitud no encontrada.");
     const flow = ["Solicitado", "Cotizando", "Aprobado", "Recursos asignados", "Pagado"];
     const next = flow[flow.indexOf(current.estado) + 1];
-    if (!next) return sendJson(res, await payload(body.email));
+    if (!next) return sendJson(res, await payload(body.email, body.password));
     const patch = {
       "Estado": select(next),
       "Actualizado en": richText(nowString()),
@@ -373,7 +408,7 @@ async function handleApi(req, res, pathname, body, query) {
       patch["Monto asignado"] = number(current.montoAsignado || current.monto);
     }
     await notion(`/pages/${current.notionPageId}`, { method: "PATCH", body: JSON.stringify({ properties: patch }) });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/brands" && req.method === "POST") {
@@ -392,7 +427,7 @@ async function handleApi(req, res, pathname, body, query) {
         },
       }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/brands/update" && req.method === "POST") {
@@ -404,7 +439,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ properties: { "Marca": title(item.nombre || ""), "Area": richText(item.area || ""), "Activo": checkbox(true) } }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/brands/delete" && req.method === "POST") {
@@ -415,7 +450,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/vendors" && req.method === "POST") {
@@ -436,7 +471,7 @@ async function handleApi(req, res, pathname, body, query) {
         },
       }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/vendors/update" && req.method === "POST") {
@@ -448,7 +483,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ properties: { "Proveedor": title(item.nombre || ""), "Servicio": richText(item.servicio || ""), "Contacto": richText(item.contacto || ""), "Telefono": phone(item.telefono || ""), "Activo": checkbox(true) } }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/vendors/delete" && req.method === "POST") {
@@ -459,12 +494,13 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/users" && req.method === "POST") {
     const { ctx } = await getContextFromBody(body);
     requireRole(ctx, ["admin"]);
+    await ensureUsersPasswordSchema();
     const item = body.user || {};
     await notion("/pages", {
       method: "POST",
@@ -475,17 +511,19 @@ async function handleApi(req, res, pathname, body, query) {
           "Email": email(item.email || ""),
           "Rol": select(item.rol || "marca"),
           "Entidad ID": richText(item.entidadId || ""),
+          "Password": richText(item.password || DEFAULT_PASSWORD),
           "Activo": checkbox(item.activo !== false),
           "Notas": richText(item.notas || ""),
         },
       }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   if (pathname === "/api/users/update" && req.method === "POST") {
     const { data, ctx } = await getContextFromBody(body);
     requireRole(ctx, ["admin"]);
+    await ensureUsersPasswordSchema();
     const item = body.user || {};
     const clean = cleanEmail(item.originalEmail || item.email);
     const current = data.users.find((x) => x.email === clean || x.notionPageId === item.notionPageId);
@@ -498,12 +536,14 @@ async function handleApi(req, res, pathname, body, query) {
           "Email": email(item.email || ""),
           "Rol": select(item.rol || "marca"),
           "Entidad ID": richText(item.entidadId || ""),
+          "Password": richText(item.password || DEFAULT_PASSWORD),
           "Activo": checkbox(item.activo),
           "Notas": richText(item.notas || ""),
         },
       }),
     });
-    return sendJson(res, await payload(body.email));
+    const nextPassword = cleanEmail(item.email) === ctx.email ? item.password || DEFAULT_PASSWORD : body.password;
+    return sendJson(res, await payload(body.email, nextPassword));
   }
 
   if (pathname === "/api/users/delete" && req.method === "POST") {
@@ -519,7 +559,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email));
+    return sendJson(res, await payload(body.email, body.password));
   }
 
   throw Object.assign(new Error("Ruta no encontrada."), { statusCode: 404 });

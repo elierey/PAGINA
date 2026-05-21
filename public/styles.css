@@ -397,7 +397,7 @@ label textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
-.settings-row.user { grid-template-columns: 1fr 1.2fr .8fr 1fr .7fr auto; }
+.settings-row.user { grid-template-columns: repeat(3, minmax(140px, 1fr)) auto; }
 .settings-row.vendor { grid-template-columns: 1fr 1fr 1fr 1fr auto; }
 .setting-actions {
   display: flex;

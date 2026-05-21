@@ -1,5 +1,6 @@
 const state = {
   email: localStorage.getItem("polar_notion_email") || "",
+  password: "",
   data: null,
   currentView: "admin",
   viewer: "",
@@ -8,6 +9,12 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
+
+const esc = (value) => String(value || "")
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;");
 
 const money = (value) => {
   const n = Number(value || 0);
@@ -56,7 +63,10 @@ async function load() {
   showError("");
   $("userCard").textContent = "Cargando...";
   try {
-    const data = await api(`/api/bootstrap?email=${encodeURIComponent(state.email)}`);
+    const data = await api("/api/bootstrap", {
+      method: "POST",
+      body: JSON.stringify({ email: state.email, password: state.password }),
+    });
     if (!data.authorized) {
       localStorage.removeItem("polar_notion_email");
       $("app").classList.add("hidden");
@@ -72,6 +82,8 @@ async function load() {
     if (data.user.role !== "admin") state.currentView = data.user.role;
     render();
   } catch (error) {
+    $("app").classList.add("hidden");
+    $("login").classList.remove("hidden");
     showError(error.message);
     $("userCard").innerHTML = `<strong>Error de carga</strong><span>${error.message}</span>`;
   }
@@ -243,14 +255,14 @@ async function saveRequest(event) {
     detalle: $("requestDetail").value,
   };
   const path = request.id ? "/api/requests/update" : "/api/requests";
-  state.data = await api(path, { method: "POST", body: JSON.stringify({ email: state.email, request }) });
+  state.data = await api(path, { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, request }) });
   $("requestDialog").close();
   render();
   showToast(request.id ? "Solicitud actualizada" : "Solicitud creada");
 }
 
 async function advanceRequest(id) {
-  state.data = await api("/api/requests/advance", { method: "POST", body: JSON.stringify({ email: state.email, id }) });
+  state.data = await api("/api/requests/advance", { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, id }) });
   render();
   showToast("Solicitud avanzada");
 }
@@ -287,15 +299,16 @@ function settingsRows(type) {
   }
   const rows = state.data.allUsers.map((u) => `
     <form class="settings-row user" data-kind="user">
-      <input name="originalEmail" type="hidden" value="${u.email}">
-      <label>Nombre<input name="nombre" value="${u.nombre || ""}"></label>
-      <label>Email<input name="email" value="${u.email || ""}"></label>
+      <input name="originalEmail" type="hidden" value="${esc(u.email)}">
+      <label>Nombre<input name="nombre" value="${esc(u.nombre)}"></label>
+      <label>Email<input name="email" value="${esc(u.email)}"></label>
       <label>Rol<select name="rol">${["admin", "marca", "proveedor"].map((r) => `<option ${u.rol === r ? "selected" : ""}>${r}</option>`).join("")}</select></label>
-      <label>Entidad ID<input name="entidadId" value="${u.entidadId || ""}"></label>
+      <label>Entidad ID<input name="entidadId" value="${esc(u.entidadId)}"></label>
+      <label>Contrasena<input name="password" value="${esc(u.password || "POLAR2026")}"></label>
       <label class="check"><input name="activo" type="checkbox" ${u.activo ? "checked" : ""}> Activo</label>
       <div class="setting-actions">
         <button class="ghost" type="submit">Guardar</button>
-        <button class="danger" type="button" data-delete-kind="user" data-delete-id="${u.email}" data-delete-name="${u.nombre || u.email}">Eliminar</button>
+        <button class="danger" type="button" data-delete-kind="user" data-delete-id="${esc(u.email)}" data-delete-name="${esc(u.nombre || u.email)}">Eliminar</button>
       </div>
     </form>`).join("");
   return `<div class="settings-list">${rows}${newUserForm()}</div>`;
@@ -310,7 +323,7 @@ function newVendorForm() {
 }
 
 function newUserForm() {
-  return `<form class="settings-row user" data-kind="user-new"><label>Nombre<input name="nombre"></label><label>Email<input name="email"></label><label>Rol<select name="rol"><option>admin</option><option>marca</option><option>proveedor</option></select></label><label>Entidad ID<input name="entidadId"></label><label class="check"><input name="activo" type="checkbox" checked> Activo</label><button class="primary">Agregar</button></form>`;
+  return `<form class="settings-row user" data-kind="user-new"><label>Nombre<input name="nombre"></label><label>Email<input name="email"></label><label>Rol<select name="rol"><option>admin</option><option>marca</option><option>proveedor</option></select></label><label>Entidad ID<input name="entidadId"></label><label>Contrasena<input name="password" value="POLAR2026"></label><label class="check"><input name="activo" type="checkbox" checked> Activo</label><button class="primary">Agregar</button></form>`;
 }
 
 function openSettings() {
@@ -331,7 +344,8 @@ async function saveSetting(form) {
   if (kind === "vendor-new") { path = "/api/vendors"; body = { vendor: data }; }
   if (kind === "user") { path = "/api/users/update"; body = { user: data }; }
   if (kind === "user-new") { path = "/api/users"; body = { user: data }; }
-  state.data = await api(path, { method: "POST", body: JSON.stringify({ email: state.email, ...body }) });
+  state.data = await api(path, { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, ...body }) });
+  if (kind === "user" && [data.originalEmail, data.email].includes(state.email)) state.password = data.password || "POLAR2026";
   render();
   $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
   showToast("Configuracion guardada");
@@ -342,7 +356,7 @@ async function deleteSetting(button) {
   const id = button.dataset.deleteId;
   const name = button.dataset.deleteName || id;
   const labels = { brand: "marca", vendor: "proveedor", user: "usuario" };
-  const ok = window.confirm(`Vas a eliminar ${labels[kind] || "registro"}: ${name}.\n\nEsta accion lo borra de la app y de la base de datos. ¿Seguro que quieres eliminarlo?`);
+  const ok = window.confirm(`Vas a eliminar ${labels[kind] || "registro"}: ${name}.\n\nEsta accion lo borra de la app y de la base de datos. Seguro que quieres eliminarlo?`);
   if (!ok) return;
   const paths = {
     brand: "/api/brands/delete",
@@ -350,7 +364,7 @@ async function deleteSetting(button) {
     user: "/api/users/delete",
   };
   const payload = kind === "user" ? { userEmail: id } : { id };
-  state.data = await api(paths[kind], { method: "POST", body: JSON.stringify({ email: state.email, ...payload }) });
+  state.data = await api(paths[kind], { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, ...payload }) });
   render();
   $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
   showToast("Registro eliminado");
@@ -361,6 +375,7 @@ document.addEventListener("submit", async (event) => {
     if (event.target.id === "loginForm") {
       event.preventDefault();
       state.email = $("emailInput").value.trim().toLowerCase();
+      state.password = $("passwordInput").value;
       await load();
     }
     if (event.target.id === "requestForm") await saveRequest(event);
@@ -408,6 +423,7 @@ $("settingsBtn").addEventListener("click", openSettings);
 $("logoutBtn").addEventListener("click", () => {
   localStorage.removeItem("polar_notion_email");
   state.email = "";
+  state.password = "";
   state.data = null;
   $("app").classList.add("hidden");
   $("login").classList.remove("hidden");
@@ -428,7 +444,4 @@ $("statusFilter").addEventListener("change", (event) => {
   renderRequests();
 });
 
-if (state.email) {
-  $("emailInput").value = state.email;
-  load();
-}
+if (state.email) $("emailInput").value = state.email;
