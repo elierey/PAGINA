@@ -353,6 +353,12 @@ dialog {
 }
 dialog::backdrop { background: rgba(5, 24, 44, .45); }
 .modal { padding: 20px; }
+.confirm-modal { max-width: 460px; }
+.confirm-text {
+  color: var(--muted);
+  line-height: 1.45;
+  margin-bottom: 0;
+}
 .modal-head {
   display: flex;
   align-items: center;

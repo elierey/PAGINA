@@ -1,6 +1,65 @@
+const storage = (() => {
+  const memory = new Map();
+  const cookieDays = 7;
+
+  function canUseCookies() {
+    return typeof document !== "undefined" && typeof document.cookie === "string";
+  }
+
+  function fromCookie(key) {
+    if (!canUseCookies()) return "";
+    const prefix = `${encodeURIComponent(key)}=`;
+    const part = document.cookie
+      .split(";")
+      .map((item) => item.trim())
+      .find((item) => item.startsWith(prefix));
+    return part ? decodeURIComponent(part.slice(prefix.length)) : "";
+  }
+
+  function toCookie(key, value) {
+    if (!canUseCookies()) return;
+    const maxAge = cookieDays * 24 * 60 * 60;
+    document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}; max-age=${maxAge}; path=/; samesite=lax`;
+  }
+
+  function removeCookie(key) {
+    if (!canUseCookies()) return;
+    document.cookie = `${encodeURIComponent(key)}=; max-age=0; path=/; samesite=lax`;
+  }
+
+  try {
+    const test = "__polar_storage_test__";
+    window.localStorage.setItem(test, test);
+    window.localStorage.removeItem(test);
+    return {
+      getItem: (key) => window.localStorage.getItem(key) || fromCookie(key),
+      setItem: (key, value) => {
+        window.localStorage.setItem(key, value);
+        toCookie(key, value);
+      },
+      removeItem: (key) => {
+        window.localStorage.removeItem(key);
+        removeCookie(key);
+      },
+    };
+  } catch {
+    return {
+      getItem: (key) => fromCookie(key) || memory.get(key) || "",
+      setItem: (key, value) => {
+        memory.set(key, String(value));
+        toCookie(key, value);
+      },
+      removeItem: (key) => {
+        memory.delete(key);
+        removeCookie(key);
+      },
+    };
+  }
+})();
+
 const state = {
-  email: localStorage.getItem("polar_notion_email") || "",
-  sessionToken: localStorage.getItem("polar_session_token") || "",
+  email: storage.getItem("polar_notion_email") || "",
+  sessionToken: storage.getItem("polar_session_token") || "",
   password: "",
   data: null,
   currentView: "admin",
@@ -50,11 +109,54 @@ function showError(message) {
   $("errorBox").classList.toggle("hidden", !message);
 }
 
+function askConfirm(message) {
+  return new Promise((resolve) => {
+    const dialog = $("confirmDialog");
+    const accept = $("confirmAccept");
+    const cancel = $("confirmCancel");
+    const text = $("confirmText");
+    let done = false;
+
+    function finish(value) {
+      if (done) return;
+      done = true;
+      accept.removeEventListener("click", onAccept);
+      cancel.removeEventListener("click", onCancel);
+      dialog.removeEventListener("cancel", onCancelEvent);
+      if (dialog.open) dialog.close();
+      resolve(value);
+    }
+
+    function onAccept() {
+      finish(true);
+    }
+
+    function onCancel() {
+      finish(false);
+    }
+
+    function onCancelEvent(event) {
+      event.preventDefault();
+      finish(false);
+    }
+
+    text.textContent = message;
+    accept.addEventListener("click", onAccept);
+    cancel.addEventListener("click", onCancel);
+    dialog.addEventListener("cancel", onCancelEvent);
+    dialog.showModal();
+  });
+}
+
 function acceptData(data) {
   state.data = data;
+  if (data.user?.email) {
+    state.email = data.user.email;
+    storage.setItem("polar_notion_email", state.email);
+  }
   if (data.sessionToken) {
     state.sessionToken = data.sessionToken;
-    localStorage.setItem("polar_session_token", state.sessionToken);
+    storage.setItem("polar_session_token", state.sessionToken);
   }
 }
 
@@ -77,8 +179,8 @@ async function load() {
       body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken }),
     });
     if (!data.authorized) {
-      localStorage.removeItem("polar_notion_email");
-      localStorage.removeItem("polar_session_token");
+      storage.removeItem("polar_notion_email");
+      storage.removeItem("polar_session_token");
       state.sessionToken = "";
       $("app").classList.add("hidden");
       $("login").classList.remove("hidden");
@@ -87,7 +189,6 @@ async function load() {
       return;
     }
     acceptData(data);
-    localStorage.setItem("polar_notion_email", state.email);
     $("login").classList.add("hidden");
     $("app").classList.remove("hidden");
     if (data.user.role !== "admin") state.currentView = data.user.role;
@@ -367,7 +468,7 @@ async function deleteSetting(button) {
   const id = button.dataset.deleteId;
   const name = button.dataset.deleteName || id;
   const labels = { brand: "marca", vendor: "proveedor", user: "usuario" };
-  const ok = window.confirm(`Vas a eliminar ${labels[kind] || "registro"}: ${name}.\n\nEsta accion lo borra de la app y de la base de datos. Seguro que quieres eliminarlo?`);
+  const ok = await askConfirm(`Vas a eliminar ${labels[kind] || "registro"}: ${name}. Esta accion lo borra de la app y de la base de datos. Seguro que quieres eliminarlo?`);
   if (!ok) return;
   const paths = {
     brand: "/api/brands/delete",
@@ -388,7 +489,7 @@ document.addEventListener("submit", async (event) => {
       state.email = $("emailInput").value.trim().toLowerCase();
       state.password = $("passwordInput").value;
       state.sessionToken = "";
-      localStorage.removeItem("polar_session_token");
+      storage.removeItem("polar_session_token");
       await load();
     }
     if (event.target.id === "requestForm") await saveRequest(event);
@@ -434,8 +535,8 @@ $("refreshBtn").addEventListener("click", load);
 $("newRequestBtn").addEventListener("click", openNewRequest);
 $("settingsBtn").addEventListener("click", openSettings);
 $("logoutBtn").addEventListener("click", () => {
-  localStorage.removeItem("polar_notion_email");
-  localStorage.removeItem("polar_session_token");
+  storage.removeItem("polar_notion_email");
+  storage.removeItem("polar_session_token");
   state.email = "";
   state.sessionToken = "";
   state.password = "";
