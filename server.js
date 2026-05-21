@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const PUBLIC_DIR = path.join(__dirname, "public");
 const NOTION_VERSION = "2022-06-28";
@@ -62,6 +63,34 @@ function cleanNotionId(value) {
 
 function cleanPassword(value) {
   return String(value || "").trim();
+}
+
+function base64url(value) {
+  return Buffer.from(value).toString("base64url");
+}
+
+function signSessionPayload(payload) {
+  return crypto.createHmac("sha256", CONFIG.token || "polar-local-session").update(payload).digest("base64url");
+}
+
+function createSessionToken(emailValue) {
+  const payload = base64url(JSON.stringify({
+    email: cleanEmail(emailValue),
+    exp: Date.now() + 1000 * 60 * 60 * 24 * 7,
+  }));
+  return `${payload}.${signSessionPayload(payload)}`;
+}
+
+function readSessionToken(token) {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature || signature !== signSessionPayload(payload)) return null;
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!session.email || Number(session.exp || 0) < Date.now()) return null;
+    return { email: cleanEmail(session.email) };
+  } catch {
+    return null;
+  }
 }
 
 function idFromName(value, existing = []) {
@@ -259,13 +288,14 @@ async function loadAll() {
   };
 }
 
-function contextFor(emailValue, users, passwordValue, requirePassword = false) {
-  const email = cleanEmail(emailValue);
+function contextFor(emailValue, users, passwordValue, requirePassword = false, sessionToken = "") {
+  const session = readSessionToken(sessionToken);
+  const email = cleanEmail(session?.email || emailValue);
   if (!email) return { authorized: false, email, message: "Escribe el correo autorizado para entrar." };
   const user = users.find((x) => x.email === email && x.activo);
   const isSuperAdmin = CONFIG.superAdmins.includes(email);
   if (!user && !isSuperAdmin) return { authorized: false, email, message: `El correo ${email} no esta activo en Usuarios y accesos - Polar.` };
-  if (requirePassword) {
+  if (requirePassword && !session) {
     const expected = cleanPassword(user?.password || DEFAULT_PASSWORD);
     if (cleanPassword(passwordValue) !== expected) return { authorized: false, email, message: "Contrasena incorrecta." };
   }
@@ -293,9 +323,9 @@ function stats(rows) {
   }, { count: 0, requested: 0, assigned: 0, pending: 0 });
 }
 
-async function payload(emailValue, passwordValue, requirePassword = true) {
+async function payload(emailValue, passwordValue, requirePassword = true, sessionToken = "") {
   const data = await loadAll();
-  const ctx = contextFor(emailValue, data.users, passwordValue, requirePassword);
+  const ctx = contextFor(emailValue, data.users, passwordValue, requirePassword, sessionToken);
   if (!ctx.authorized) return ctx;
   const activeBrands = data.brands.filter((x) => x.activo);
   const activeVendors = data.vendors.filter((x) => x.activo);
@@ -312,6 +342,7 @@ async function payload(emailValue, passwordValue, requirePassword = true) {
     allVendors: ctx.role === "admin" || ctx.role === "marca" ? activeVendors : visibleVendors,
     allUsers: ctx.role === "admin" ? data.users : [],
     requests,
+    sessionToken: createSessionToken(ctx.email),
     stats: stats(requests),
   };
 }
@@ -323,7 +354,7 @@ function requireRole(ctx, roles) {
 
 async function getContextFromBody(body) {
   const data = await loadAll();
-  const ctx = contextFor(body.email, data.users, body.password, true);
+  const ctx = contextFor(body.email, data.users, body.password, true, body.sessionToken);
   return { data, ctx };
 }
 
@@ -360,7 +391,8 @@ async function handleApi(req, res, pathname, body, query) {
   if (pathname === "/api/bootstrap" && (req.method === "GET" || req.method === "POST")) {
     const emailValue = req.method === "GET" ? query.get("email") : body.email;
     const passwordValue = req.method === "GET" ? query.get("password") : body.password;
-    return sendJson(res, await payload(emailValue, passwordValue, true));
+    const sessionToken = req.method === "GET" ? query.get("sessionToken") : body.sessionToken;
+    return sendJson(res, await payload(emailValue, passwordValue, true, sessionToken));
   }
 
   if (pathname === "/api/requests" && req.method === "POST") {
@@ -370,7 +402,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "POST",
       body: JSON.stringify({ parent: { database_id: CONFIG.db.requests }, properties: requestProps(body.request || {}, ctx) }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/requests/update" && req.method === "POST") {
@@ -383,7 +415,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ properties: requestProps({ ...current, ...(body.request || {}) }, ctx, true) }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/requests/advance" && req.method === "POST") {
@@ -393,7 +425,7 @@ async function handleApi(req, res, pathname, body, query) {
     if (!current) throw new Error("Solicitud no encontrada.");
     const flow = ["Solicitado", "Cotizando", "Aprobado", "Recursos asignados", "Pagado"];
     const next = flow[flow.indexOf(current.estado) + 1];
-    if (!next) return sendJson(res, await payload(body.email, body.password));
+    if (!next) return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
     const patch = {
       "Estado": select(next),
       "Actualizado en": richText(nowString()),
@@ -408,7 +440,7 @@ async function handleApi(req, res, pathname, body, query) {
       patch["Monto asignado"] = number(current.montoAsignado || current.monto);
     }
     await notion(`/pages/${current.notionPageId}`, { method: "PATCH", body: JSON.stringify({ properties: patch }) });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/brands" && req.method === "POST") {
@@ -427,7 +459,7 @@ async function handleApi(req, res, pathname, body, query) {
         },
       }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/brands/update" && req.method === "POST") {
@@ -439,7 +471,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ properties: { "Marca": title(item.nombre || ""), "Area": richText(item.area || ""), "Activo": checkbox(true) } }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/brands/delete" && req.method === "POST") {
@@ -450,7 +482,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/vendors" && req.method === "POST") {
@@ -471,7 +503,7 @@ async function handleApi(req, res, pathname, body, query) {
         },
       }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/vendors/update" && req.method === "POST") {
@@ -483,7 +515,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ properties: { "Proveedor": title(item.nombre || ""), "Servicio": richText(item.servicio || ""), "Contacto": richText(item.contacto || ""), "Telefono": phone(item.telefono || ""), "Activo": checkbox(true) } }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/vendors/delete" && req.method === "POST") {
@@ -494,7 +526,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/users" && req.method === "POST") {
@@ -517,7 +549,7 @@ async function handleApi(req, res, pathname, body, query) {
         },
       }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   if (pathname === "/api/users/update" && req.method === "POST") {
@@ -543,7 +575,8 @@ async function handleApi(req, res, pathname, body, query) {
       }),
     });
     const nextPassword = cleanEmail(item.email) === ctx.email ? item.password || DEFAULT_PASSWORD : body.password;
-    return sendJson(res, await payload(body.email, nextPassword));
+    const nextToken = cleanEmail(item.email) === ctx.email ? "" : body.sessionToken;
+    return sendJson(res, await payload(body.email, nextPassword, true, nextToken));
   }
 
   if (pathname === "/api/users/delete" && req.method === "POST") {
@@ -559,7 +592,7 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email, body.password));
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
   throw Object.assign(new Error("Ruta no encontrada."), { statusCode: 404 });
