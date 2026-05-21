@@ -11,7 +11,12 @@ const $ = (id) => document.getElementById(id);
 
 const money = (value) => {
   const n = Number(value || 0);
-  return `Bs ${new Intl.NumberFormat("es-VE", { maximumFractionDigits: 0 }).format(n)}`;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(n);
 };
 
 function brandName(id) {
