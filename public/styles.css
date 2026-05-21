@@ -41,11 +41,48 @@ button { cursor: pointer; }
 .login-card h1 { margin: 6px 0 8px; font-size: 42px; }
 .login-card form { display: grid; gap: 10px; margin-top: 18px; }
 .login-card input {
+  width: 100%;
   min-height: 46px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0 12px;
 }
+.password-field {
+  position: relative;
+}
+.password-field input {
+  padding-right: 48px;
+}
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  color: var(--blue);
+  background: var(--soft);
+}
+.password-toggle svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.password-toggle .eye-closed { display: none; }
+.password-toggle.is-visible .eye-open { display: none; }
+.password-toggle.is-visible .eye-closed { display: block; }
 .note { color: var(--muted); font-size: .9rem; margin-bottom: 0; }
 
 .shell {

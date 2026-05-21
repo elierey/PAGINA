@@ -14,7 +14,20 @@
         <h1>Control ADM</h1>
         <form id="loginForm">
           <input id="emailInput" type="email" placeholder="correo@empresa.com" autocomplete="email" required>
-          <input id="passwordInput" type="password" placeholder="Contrasena" autocomplete="current-password" required>
+          <div class="password-field">
+            <input id="passwordInput" type="password" placeholder="Contrasena" autocomplete="current-password" required>
+            <button id="togglePasswordBtn" class="password-toggle" type="button" aria-label="Mostrar contrasena">
+              <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M4 4l16 16"></path>
+              </svg>
+            </button>
+          </div>
           <button class="primary" type="submit">Entrar</button>
         </form>
       </section>

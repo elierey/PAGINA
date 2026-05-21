@@ -443,5 +443,11 @@ $("statusFilter").addEventListener("change", (event) => {
   renderMetrics();
   renderRequests();
 });
+$("togglePasswordBtn").addEventListener("click", () => {
+  const visible = $("passwordInput").type === "text";
+  $("passwordInput").type = visible ? "password" : "text";
+  $("togglePasswordBtn").classList.toggle("is-visible", !visible);
+  $("togglePasswordBtn").setAttribute("aria-label", visible ? "Mostrar contrasena" : "Ocultar contrasena");
+});
 
 if (state.email) $("emailInput").value = state.email;
