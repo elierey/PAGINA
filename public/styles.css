@@ -399,6 +399,12 @@ label textarea {
 }
 .settings-row.user { grid-template-columns: 1fr 1.2fr .8fr 1fr .7fr auto; }
 .settings-row.vendor { grid-template-columns: 1fr 1fr 1fr 1fr auto; }
+.setting-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .error {
   background: #fff5f6;
   color: #8f1e28;

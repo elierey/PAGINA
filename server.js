@@ -407,6 +407,17 @@ async function handleApi(req, res, pathname, body, query) {
     return sendJson(res, await payload(body.email));
   }
 
+  if (pathname === "/api/brands/delete" && req.method === "POST") {
+    const { data, ctx } = await getContextFromBody(body);
+    requireRole(ctx, ["admin"]);
+    const pageId = await findPageId(data.brands, body.id);
+    await notion(`/pages/${pageId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived: true }),
+    });
+    return sendJson(res, await payload(body.email));
+  }
+
   if (pathname === "/api/vendors" && req.method === "POST") {
     const { data, ctx } = await getContextFromBody(body);
     requireRole(ctx, ["admin"]);
@@ -436,6 +447,17 @@ async function handleApi(req, res, pathname, body, query) {
     await notion(`/pages/${pageId}`, {
       method: "PATCH",
       body: JSON.stringify({ properties: { "Proveedor": title(item.nombre || ""), "Servicio": richText(item.servicio || ""), "Contacto": richText(item.contacto || ""), "Telefono": phone(item.telefono || ""), "Activo": checkbox(true) } }),
+    });
+    return sendJson(res, await payload(body.email));
+  }
+
+  if (pathname === "/api/vendors/delete" && req.method === "POST") {
+    const { data, ctx } = await getContextFromBody(body);
+    requireRole(ctx, ["admin"]);
+    const pageId = await findPageId(data.vendors, body.id);
+    await notion(`/pages/${pageId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived: true }),
     });
     return sendJson(res, await payload(body.email));
   }
@@ -480,6 +502,22 @@ async function handleApi(req, res, pathname, body, query) {
           "Notas": richText(item.notas || ""),
         },
       }),
+    });
+    return sendJson(res, await payload(body.email));
+  }
+
+  if (pathname === "/api/users/delete" && req.method === "POST") {
+    const { data, ctx } = await getContextFromBody(body);
+    requireRole(ctx, ["admin"]);
+    const clean = cleanEmail(body.userEmail);
+    if (clean === ctx.email && !CONFIG.superAdmins.includes(ctx.email)) {
+      throw new Error("No puedes eliminar tu propio usuario administrador.");
+    }
+    const current = data.users.find((x) => x.email === clean || x.notionPageId === body.notionPageId);
+    if (!current) throw new Error("Usuario no encontrado.");
+    await notion(`/pages/${current.notionPageId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived: true }),
     });
     return sendJson(res, await payload(body.email));
   }

@@ -263,7 +263,10 @@ function settingsRows(type) {
         <label>Marca<input name="nombre" value="${b.nombre || ""}"></label>
         <label>Area<input name="area" value="${b.area || ""}"></label>
         <span></span>
-        <button class="ghost">Guardar</button>
+        <div class="setting-actions">
+          <button class="ghost" type="submit">Guardar</button>
+          <button class="danger" type="button" data-delete-kind="brand" data-delete-id="${b.id}" data-delete-name="${b.nombre || b.id}">Eliminar</button>
+        </div>
       </form>`).join("");
     return `<div class="settings-list">${rows}${newBrandForm()}</div>`;
   }
@@ -275,7 +278,10 @@ function settingsRows(type) {
         <label>Servicio<input name="servicio" value="${v.servicio || ""}"></label>
         <label>Contacto<input name="contacto" value="${v.contacto || ""}"></label>
         <label>Telefono<input name="telefono" value="${v.telefono || ""}"></label>
-        <button class="ghost">Guardar</button>
+        <div class="setting-actions">
+          <button class="ghost" type="submit">Guardar</button>
+          <button class="danger" type="button" data-delete-kind="vendor" data-delete-id="${v.id}" data-delete-name="${v.nombre || v.id}">Eliminar</button>
+        </div>
       </form>`).join("");
     return `<div class="settings-list">${rows}${newVendorForm()}</div>`;
   }
@@ -287,7 +293,10 @@ function settingsRows(type) {
       <label>Rol<select name="rol">${["admin", "marca", "proveedor"].map((r) => `<option ${u.rol === r ? "selected" : ""}>${r}</option>`).join("")}</select></label>
       <label>Entidad ID<input name="entidadId" value="${u.entidadId || ""}"></label>
       <label class="check"><input name="activo" type="checkbox" ${u.activo ? "checked" : ""}> Activo</label>
-      <button class="ghost">Guardar</button>
+      <div class="setting-actions">
+        <button class="ghost" type="submit">Guardar</button>
+        <button class="danger" type="button" data-delete-kind="user" data-delete-id="${u.email}" data-delete-name="${u.nombre || u.email}">Eliminar</button>
+      </div>
     </form>`).join("");
   return `<div class="settings-list">${rows}${newUserForm()}</div>`;
 }
@@ -328,6 +337,25 @@ async function saveSetting(form) {
   showToast("Configuracion guardada");
 }
 
+async function deleteSetting(button) {
+  const kind = button.dataset.deleteKind;
+  const id = button.dataset.deleteId;
+  const name = button.dataset.deleteName || id;
+  const labels = { brand: "marca", vendor: "proveedor", user: "usuario" };
+  const ok = window.confirm(`Vas a eliminar ${labels[kind] || "registro"}: ${name}.\n\nEsta accion lo borra de la app y de la base de datos. ¿Seguro que quieres eliminarlo?`);
+  if (!ok) return;
+  const paths = {
+    brand: "/api/brands/delete",
+    vendor: "/api/vendors/delete",
+    user: "/api/users/delete",
+  };
+  const payload = kind === "user" ? { userEmail: id } : { id };
+  state.data = await api(paths[kind], { method: "POST", body: JSON.stringify({ email: state.email, ...payload }) });
+  render();
+  $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
+  showToast("Registro eliminado");
+}
+
 document.addEventListener("submit", async (event) => {
   try {
     if (event.target.id === "loginForm") {
@@ -366,6 +394,8 @@ document.addEventListener("click", async (event) => {
     if (edit) openEditRequest(edit.dataset.edit);
     const advance = event.target.closest("[data-advance]");
     if (advance) await advanceRequest(advance.dataset.advance);
+    const remove = event.target.closest("[data-delete-kind]");
+    if (remove) await deleteSetting(remove);
   } catch (error) {
     showError(error.message);
     showToast("Error");
