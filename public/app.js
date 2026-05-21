@@ -1,0 +1,399 @@
+const state = {
+  email: localStorage.getItem("polar_notion_email") || "",
+  data: null,
+  currentView: "admin",
+  viewer: "",
+  search: "",
+  status: "",
+};
+
+const $ = (id) => document.getElementById(id);
+
+const money = (value) => {
+  const n = Number(value || 0);
+  return `Bs ${new Intl.NumberFormat("es-VE", { maximumFractionDigits: 0 }).format(n)}`;
+};
+
+function brandName(id) {
+  return state.data?.allBrands?.find((x) => x.id === id)?.nombre || id || "";
+}
+
+function brandArea(id) {
+  return state.data?.allBrands?.find((x) => x.id === id)?.area || "";
+}
+
+function vendorName(id) {
+  return state.data?.allVendors?.find((x) => x.id === id)?.nombre || id || "";
+}
+
+function showToast(message) {
+  $("toast").textContent = message;
+  $("toast").classList.remove("hidden");
+  setTimeout(() => $("toast").classList.add("hidden"), 2600);
+}
+
+function showError(message) {
+  $("errorBox").textContent = message || "";
+  $("errorBox").classList.toggle("hidden", !message);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+  });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) throw new Error(data.message || "No se pudo conectar con Notion.");
+  return data;
+}
+
+async function load() {
+  showError("");
+  $("userCard").textContent = "Cargando...";
+  try {
+    const data = await api(`/api/bootstrap?email=${encodeURIComponent(state.email)}`);
+    if (!data.authorized) {
+      localStorage.removeItem("polar_notion_email");
+      $("app").classList.add("hidden");
+      $("login").classList.remove("hidden");
+      $("emailInput").value = state.email || "";
+      showToast(data.message || "Correo no autorizado");
+      return;
+    }
+    state.data = data;
+    localStorage.setItem("polar_notion_email", state.email);
+    $("login").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    if (data.user.role !== "admin") state.currentView = data.user.role;
+    render();
+  } catch (error) {
+    showError(error.message);
+    $("userCard").innerHTML = `<strong>Error de carga</strong><span>${error.message}</span>`;
+  }
+}
+
+function visibleRequests() {
+  let rows = [...(state.data?.requests || [])];
+  if (state.data.user.role === "admin") {
+    if (state.currentView === "marca" && state.viewer) rows = rows.filter((r) => r.marcaId === state.viewer);
+    if (state.currentView === "proveedor" && state.viewer) rows = rows.filter((r) => r.proveedorId === state.viewer);
+  }
+  if (state.status) rows = rows.filter((r) => r.estado === state.status);
+  if (state.search) {
+    const needle = state.search.toLowerCase();
+    rows = rows.filter((r) => [
+      r.descripcion,
+      r.detalle,
+      r.responsable,
+      brandName(r.marcaId),
+      vendorName(r.proveedorId),
+      r.estado,
+    ].join(" ").toLowerCase().includes(needle));
+  }
+  return rows;
+}
+
+function render() {
+  const { user } = state.data;
+  $("userCard").innerHTML = `<strong>${user.nombre || user.email}</strong><span>${user.email} - ${user.role}</span>`;
+
+  document.querySelectorAll(".admin-only").forEach((el) => el.classList.toggle("hidden", user.role !== "admin"));
+  document.querySelectorAll(".can-create").forEach((el) => el.classList.toggle("hidden", !["admin", "marca"].includes(user.role)));
+  $("roleTabs").classList.toggle("hidden", user.role !== "admin");
+  $("viewerPanel").classList.toggle("hidden", user.role !== "admin");
+
+  document.querySelectorAll(".role-button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === state.currentView);
+  });
+
+  renderViewer();
+  renderMetrics();
+  renderRequests();
+  renderVendors();
+  renderRequestOptions();
+}
+
+function renderViewer() {
+  const select = $("viewerSelect");
+  if (state.currentView === "admin") {
+    select.innerHTML = `<option value="">Todo el sistema</option>`;
+    state.viewer = "";
+    $("accessText").textContent = "El administrador ve todas las marcas, solicitudes, proveedores, montos y recursos.";
+    return;
+  }
+  const source = state.currentView === "marca" ? state.data.allBrands : state.data.allVendors;
+  const label = state.currentView === "marca" ? "Todas las marcas" : "Todos los proveedores";
+  select.innerHTML = `<option value="">${label}</option>` + source.map((item) => `<option value="${item.id}">${item.nombre}</option>`).join("");
+  select.value = state.viewer;
+  $("accessText").textContent = state.currentView === "marca"
+    ? "Vista filtrada por marca."
+    : "Vista filtrada por proveedor.";
+}
+
+function renderMetrics() {
+  const rows = visibleRequests();
+  const stats = rows.reduce((s, r) => {
+    const amount = Number(r.monto || 0);
+    const assigned = Number(r.montoAsignado || 0);
+    s.count += 1;
+    s.requested += amount;
+    s.assigned += assigned;
+    s.pending += r.pagado ? 0 : (assigned || amount);
+    return s;
+  }, { count: 0, requested: 0, assigned: 0, pending: 0 });
+  $("statCount").textContent = stats.count;
+  $("statRequested").textContent = money(stats.requested);
+  $("statAssigned").textContent = money(stats.assigned);
+  $("statPending").textContent = money(stats.pending);
+}
+
+function renderRequests() {
+  const rows = visibleRequests();
+  $("requestCount").textContent = `${rows.length} registros`;
+  $("requestsBody").innerHTML = rows.map((r) => {
+    const resourceClass = r.recursosAsignados ? "pill ok" : "pill";
+    const paidClass = r.pagado ? "pill paid" : "pill";
+    const canAdvance = state.data.user.role === "admin" && r.estado !== "Pagado";
+    const canEdit = state.data.user.role === "admin" || state.data.user.role === "marca";
+    return `
+      <tr>
+        <td><strong>${brandName(r.marcaId)}</strong><div class="sub">${brandArea(r.marcaId)}</div></td>
+        <td>${r.razon || ""}</td>
+        <td><strong>${r.descripcion || ""}</strong><div class="sub">${r.detalle || ""}</div></td>
+        <td>${r.responsable || ""}</td>
+        <td>${(r.fecha || "").slice(0, 10)}</td>
+        <td>${vendorName(r.proveedorId)}</td>
+        <td><strong>${money(r.monto)}</strong><span class="${paidClass}">${r.pagado ? "Pagado" : "Pendiente"}</span></td>
+        <td><span class="${resourceClass}">${r.recursosAsignados ? "Si" : "No"}</span><div class="sub">${r.recursosAsignados ? `${money(r.montoAsignado)} asignado` : "Pendiente por asignar"}</div></td>
+        <td>
+          <div class="row-actions">
+            ${canEdit ? `<button class="ghost" data-edit="${r.id}">Editar</button>` : ""}
+            ${canAdvance ? `<button class="ghost" data-advance="${r.id}">Avanzar</button>` : ""}
+          </div>
+        </td>
+      </tr>`;
+  }).join("");
+}
+
+function renderVendors() {
+  const vendors = state.data.vendors || [];
+  $("vendorCount").textContent = `${vendors.length} visibles`;
+  $("vendorList").innerHTML = vendors.map((v) => `
+    <article class="vendor-item">
+      <strong>${v.nombre}</strong>
+      <div class="sub">${v.servicio || ""}</div>
+      <div class="sub">${v.contacto || ""}</div>
+      <div>${v.telefono || ""}</div>
+    </article>`).join("");
+}
+
+function renderRequestOptions() {
+  $("requestBrand").innerHTML = state.data.allBrands.map((b) => `<option value="${b.id}">${b.nombre}</option>`).join("");
+  $("requestVendor").innerHTML = state.data.allVendors.map((v) => `<option value="${v.id}">${v.nombre}</option>`).join("");
+  if (state.data.user.role === "marca") {
+    $("requestBrand").value = state.data.user.entidadId;
+    $("requestBrand").disabled = true;
+  } else {
+    $("requestBrand").disabled = false;
+  }
+}
+
+function openNewRequest() {
+  $("requestDialogTitle").textContent = "Nueva solicitud";
+  $("requestId").value = "";
+  $("requestForm").reset();
+  renderRequestOptions();
+  $("requestDialog").showModal();
+}
+
+function openEditRequest(id) {
+  const request = state.data.requests.find((r) => r.id === id);
+  if (!request) return;
+  $("requestDialogTitle").textContent = "Editar solicitud";
+  $("requestId").value = request.id;
+  $("requestBrand").value = request.marcaId;
+  $("requestReason").value = request.razon;
+  $("requestDescription").value = request.descripcion;
+  $("requestOwner").value = request.responsable;
+  $("requestDate").value = (request.fecha || "").slice(0, 10);
+  $("requestVendor").value = request.proveedorId;
+  $("requestAmount").value = request.monto || 0;
+  $("requestResources").checked = Boolean(request.recursosAsignados);
+  $("requestDetail").value = request.detalle || "";
+  $("requestDialog").showModal();
+}
+
+async function saveRequest(event) {
+  event.preventDefault();
+  const request = {
+    id: $("requestId").value,
+    marcaId: $("requestBrand").value,
+    razon: $("requestReason").value,
+    descripcion: $("requestDescription").value,
+    responsable: $("requestOwner").value,
+    fecha: $("requestDate").value,
+    proveedorId: $("requestVendor").value,
+    monto: Number($("requestAmount").value || 0),
+    recursosAsignados: $("requestResources").checked,
+    detalle: $("requestDetail").value,
+  };
+  const path = request.id ? "/api/requests/update" : "/api/requests";
+  state.data = await api(path, { method: "POST", body: JSON.stringify({ email: state.email, request }) });
+  $("requestDialog").close();
+  render();
+  showToast(request.id ? "Solicitud actualizada" : "Solicitud creada");
+}
+
+async function advanceRequest(id) {
+  state.data = await api("/api/requests/advance", { method: "POST", body: JSON.stringify({ email: state.email, id }) });
+  render();
+  showToast("Solicitud avanzada");
+}
+
+function settingsRows(type) {
+  if (type === "brands") {
+    const rows = state.data.allBrands.map((b) => `
+      <form class="settings-row" data-kind="brand">
+        <input name="id" type="hidden" value="${b.id}">
+        <label>Marca<input name="nombre" value="${b.nombre || ""}"></label>
+        <label>Area<input name="area" value="${b.area || ""}"></label>
+        <span></span>
+        <button class="ghost">Guardar</button>
+      </form>`).join("");
+    return `<div class="settings-list">${rows}${newBrandForm()}</div>`;
+  }
+  if (type === "vendors") {
+    const rows = state.data.allVendors.map((v) => `
+      <form class="settings-row vendor" data-kind="vendor">
+        <input name="id" type="hidden" value="${v.id}">
+        <label>Proveedor<input name="nombre" value="${v.nombre || ""}"></label>
+        <label>Servicio<input name="servicio" value="${v.servicio || ""}"></label>
+        <label>Contacto<input name="contacto" value="${v.contacto || ""}"></label>
+        <label>Telefono<input name="telefono" value="${v.telefono || ""}"></label>
+        <button class="ghost">Guardar</button>
+      </form>`).join("");
+    return `<div class="settings-list">${rows}${newVendorForm()}</div>`;
+  }
+  const rows = state.data.allUsers.map((u) => `
+    <form class="settings-row user" data-kind="user">
+      <input name="originalEmail" type="hidden" value="${u.email}">
+      <label>Nombre<input name="nombre" value="${u.nombre || ""}"></label>
+      <label>Email<input name="email" value="${u.email || ""}"></label>
+      <label>Rol<select name="rol">${["admin", "marca", "proveedor"].map((r) => `<option ${u.rol === r ? "selected" : ""}>${r}</option>`).join("")}</select></label>
+      <label>Entidad ID<input name="entidadId" value="${u.entidadId || ""}"></label>
+      <label class="check"><input name="activo" type="checkbox" ${u.activo ? "checked" : ""}> Activo</label>
+      <button class="ghost">Guardar</button>
+    </form>`).join("");
+  return `<div class="settings-list">${rows}${newUserForm()}</div>`;
+}
+
+function newBrandForm() {
+  return `<form class="settings-row" data-kind="brand-new"><label>Nueva marca<input name="nombre"></label><label>Area<input name="area"></label><span></span><button class="primary">Agregar</button></form>`;
+}
+
+function newVendorForm() {
+  return `<form class="settings-row vendor" data-kind="vendor-new"><label>Nuevo proveedor<input name="nombre"></label><label>Servicio<input name="servicio"></label><label>Contacto<input name="contacto"></label><label>Telefono<input name="telefono"></label><button class="primary">Agregar</button></form>`;
+}
+
+function newUserForm() {
+  return `<form class="settings-row user" data-kind="user-new"><label>Nombre<input name="nombre"></label><label>Email<input name="email"></label><label>Rol<select name="rol"><option>admin</option><option>marca</option><option>proveedor</option></select></label><label>Entidad ID<input name="entidadId"></label><label class="check"><input name="activo" type="checkbox" checked> Activo</label><button class="primary">Agregar</button></form>`;
+}
+
+function openSettings() {
+  $("settingsContent").innerHTML = settingsRows("brands");
+  document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === "brands"));
+  $("settingsDialog").showModal();
+}
+
+async function saveSetting(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.activo = form.querySelector('[name="activo"]')?.checked ?? true;
+  const kind = form.dataset.kind;
+  let path;
+  let body;
+  if (kind === "brand") { path = "/api/brands/update"; body = { brand: data }; }
+  if (kind === "brand-new") { path = "/api/brands"; body = { brand: data }; }
+  if (kind === "vendor") { path = "/api/vendors/update"; body = { vendor: data }; }
+  if (kind === "vendor-new") { path = "/api/vendors"; body = { vendor: data }; }
+  if (kind === "user") { path = "/api/users/update"; body = { user: data }; }
+  if (kind === "user-new") { path = "/api/users"; body = { user: data }; }
+  state.data = await api(path, { method: "POST", body: JSON.stringify({ email: state.email, ...body }) });
+  render();
+  $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
+  showToast("Configuracion guardada");
+}
+
+document.addEventListener("submit", async (event) => {
+  try {
+    if (event.target.id === "loginForm") {
+      event.preventDefault();
+      state.email = $("emailInput").value.trim().toLowerCase();
+      await load();
+    }
+    if (event.target.id === "requestForm") await saveRequest(event);
+    if (event.target.matches(".settings-row")) {
+      event.preventDefault();
+      await saveSetting(event.target);
+    }
+  } catch (error) {
+    showError(error.message);
+    showToast("Error");
+  }
+});
+
+document.addEventListener("click", async (event) => {
+  try {
+    const close = event.target.closest("[data-close]");
+    if (close) close.closest("dialog").close();
+    const tab = event.target.closest(".role-button");
+    if (tab) {
+      state.currentView = tab.dataset.view;
+      state.viewer = "";
+      render();
+    }
+    const settingsTab = event.target.closest(".tab");
+    if (settingsTab) {
+      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+      settingsTab.classList.add("active");
+      $("settingsContent").innerHTML = settingsRows(settingsTab.dataset.tab);
+    }
+    const edit = event.target.closest("[data-edit]");
+    if (edit) openEditRequest(edit.dataset.edit);
+    const advance = event.target.closest("[data-advance]");
+    if (advance) await advanceRequest(advance.dataset.advance);
+  } catch (error) {
+    showError(error.message);
+    showToast("Error");
+  }
+});
+
+$("refreshBtn").addEventListener("click", load);
+$("newRequestBtn").addEventListener("click", openNewRequest);
+$("settingsBtn").addEventListener("click", openSettings);
+$("logoutBtn").addEventListener("click", () => {
+  localStorage.removeItem("polar_notion_email");
+  state.email = "";
+  state.data = null;
+  $("app").classList.add("hidden");
+  $("login").classList.remove("hidden");
+});
+$("viewerSelect").addEventListener("change", (event) => {
+  state.viewer = event.target.value;
+  renderMetrics();
+  renderRequests();
+});
+$("searchInput").addEventListener("input", (event) => {
+  state.search = event.target.value;
+  renderMetrics();
+  renderRequests();
+});
+$("statusFilter").addEventListener("change", (event) => {
+  state.status = event.target.value;
+  renderMetrics();
+  renderRequests();
+});
+
+if (state.email) {
+  $("emailInput").value = state.email;
+  load();
+}

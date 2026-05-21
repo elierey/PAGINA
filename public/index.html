@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Control Adm Eventos Polar - Notion</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div id="login" class="login">
+      <section class="login-card">
+        <div class="logo-card"><span>ooo</span>EMPRESAS<br>POLAR</div>
+        <p class="eyebrow">Version Notion</p>
+        <h1>Control ADM</h1>
+        <p>Entra con un correo registrado en la base de usuarios de Notion.</p>
+        <form id="loginForm">
+          <input id="emailInput" type="email" placeholder="correo@empresa.com" autocomplete="email" required>
+          <button class="primary" type="submit">Entrar</button>
+        </form>
+        <p class="note">Esta version usa Notion como base compartida. La version Google Sheets queda igual.</p>
+      </section>
+    </div>
+
+    <div id="app" class="shell hidden">
+      <aside>
+        <div class="brand-lockup">
+          <div class="logo-card"><span>ooo</span>EMPRESAS<br>POLAR</div>
+          <div>
+            <strong>Control ADM</strong>
+            <span>Eventos y plataformas</span>
+          </div>
+        </div>
+
+        <div class="role-card" id="userCard">Cargando...</div>
+
+        <div class="role-switcher" id="roleTabs">
+          <button class="role-button active" data-view="admin"><span>A</span>Administrador</button>
+          <button class="role-button" data-view="marca"><span>M</span>Marca</button>
+          <button class="role-button" data-view="proveedor"><span>P</span>Proveedor</button>
+        </div>
+
+        <div class="viewer-panel" id="viewerPanel">
+          <label>Cuenta / vista</label>
+          <select id="viewerSelect"></select>
+        </div>
+
+        <div class="access-card">
+          <strong>Regla de acceso</strong>
+          <span id="accessText">Cada usuario ve lo autorizado para su correo.</span>
+        </div>
+      </aside>
+
+      <main>
+        <header>
+          <div>
+            <p class="eyebrow">Presupuestos de eventos</p>
+            <h1>Panel general</h1>
+            <p class="muted">Base compartida en Notion con vista tipo app.</p>
+          </div>
+          <div class="actions">
+            <button class="ghost admin-only" id="settingsBtn">Configuracion</button>
+            <button class="primary can-create" id="newRequestBtn">Nueva solicitud</button>
+            <button class="ghost" id="refreshBtn">Actualizar</button>
+            <button class="danger" id="logoutBtn">Cerrar sesion</button>
+          </div>
+        </header>
+
+        <section id="errorBox" class="error hidden"></section>
+
+        <section class="metrics">
+          <article class="metric"><span>Registros visibles</span><strong id="statCount">0</strong></article>
+          <article class="metric"><span>Presupuesto solicitado</span><strong id="statRequested">Bs 0</strong></article>
+          <article class="metric"><span>Monto con recursos</span><strong id="statAssigned">Bs 0</strong></article>
+          <article class="metric"><span>Por pagar / debe</span><strong id="statPending">Bs 0</strong></article>
+        </section>
+
+        <section class="filters">
+          <input id="searchInput" placeholder="Buscar descripcion, proveedor, marca o responsable">
+          <select id="statusFilter">
+            <option value="">Todos los estados</option>
+            <option>Solicitado</option>
+            <option>Cotizando</option>
+            <option>Aprobado</option>
+            <option>Recursos asignados</option>
+            <option>Pagado</option>
+          </select>
+        </section>
+
+        <section class="table-card">
+          <div class="table-head">
+            <h2>Solicitudes</h2>
+            <span id="requestCount">0 registros</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Marca</th>
+                  <th>Razon</th>
+                  <th>Descripcion</th>
+                  <th>Responsable</th>
+                  <th>Fecha</th>
+                  <th>Proveedor</th>
+                  <th>Monto</th>
+                  <th>Recursos</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="requestsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="table-card" id="vendorsCard">
+          <div class="table-head">
+            <h2>Contactos proveedores</h2>
+            <span id="vendorCount">0 visibles</span>
+          </div>
+          <div id="vendorList" class="vendor-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="requestDialog">
+      <form method="dialog" class="modal" id="requestForm">
+        <div class="modal-head">
+          <h2 id="requestDialogTitle">Nueva solicitud</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <input type="hidden" id="requestId">
+        <div class="form-grid">
+          <label>Marca<select id="requestBrand" required></select></label>
+          <label>Razon<select id="requestReason" required><option>pcv</option><option>efe</option><option>cp</option><option>opc</option></select></label>
+          <label class="wide">Descripcion<input id="requestDescription" required></label>
+          <label>Responsable<input id="requestOwner" required></label>
+          <label>Fecha<input id="requestDate" type="date" required></label>
+          <label>Proveedor<select id="requestVendor" required></select></label>
+          <label>Monto<input id="requestAmount" type="number" step="0.01" min="0" required></label>
+          <label class="check"><input id="requestResources" type="checkbox"> Recursos asignados</label>
+          <label class="wide">Detalle<textarea id="requestDetail" rows="3"></textarea></label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button class="primary" type="submit">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="settingsDialog">
+      <section class="modal settings">
+        <div class="modal-head">
+          <h2>Configuracion</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="brands">Marcas</button>
+          <button class="tab" data-tab="vendors">Proveedores</button>
+          <button class="tab" data-tab="users">Usuarios</button>
+        </div>
+        <div id="settingsContent"></div>
+      </section>
+    </dialog>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

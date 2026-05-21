@@ -1,0 +1,9 @@
+{
+  "name": "control-adm-eventos-polar-notion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "App visual para Control ADM Eventos Polar usando Notion como base de datos.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

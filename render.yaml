@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: control-adm-eventos-polar
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NOTION_DB_SOLICITUDES
+        value: 21ae3d021d1b4344b05c28c9ee7eba44
+      - key: NOTION_DB_MARCAS
+        value: a11d78243cd941039e27f810969f8942
+      - key: NOTION_DB_PROVEEDORES
+        value: 440bc180be9c486e834ea9cd264105e8
+      - key: NOTION_DB_USUARIOS
+        value: 995bf3d3093343e595e6f335a8245365
