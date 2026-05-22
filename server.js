@@ -443,6 +443,18 @@ async function handleApi(req, res, pathname, body, query) {
     return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
   }
 
+  if (pathname === "/api/requests/delete" && req.method === "POST") {
+    const { data, ctx } = await getContextFromBody(body);
+    requireRole(ctx, ["admin"]);
+    const current = data.requests.find((x) => x.id === body.id || x.notionPageId === body.id);
+    if (!current) throw new Error("Solicitud no encontrada.");
+    await notion(`/pages/${current.notionPageId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived: true }),
+    });
+    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+  }
+
   if (pathname === "/api/brands" && req.method === "POST") {
     const { data, ctx } = await getContextFromBody(body);
     requireRole(ctx, ["admin"]);

@@ -284,6 +284,7 @@ function renderRequests() {
     const paidClass = r.pagado ? "pill paid" : "pill";
     const canAdvance = state.data.user.role === "admin" && r.estado !== "Pagado";
     const canEdit = state.data.user.role === "admin" || state.data.user.role === "marca";
+    const canDelete = state.data.user.role === "admin";
     return `
       <tr>
         <td><strong>${brandName(r.marcaId)}</strong><div class="sub">${brandArea(r.marcaId)}</div></td>
@@ -298,6 +299,7 @@ function renderRequests() {
           <div class="row-actions">
             ${canEdit ? `<button class="ghost" data-edit="${r.id}">Editar</button>` : ""}
             ${canAdvance ? `<button class="ghost" data-advance="${r.id}">Avanzar</button>` : ""}
+            ${canDelete ? `<button class="danger" data-delete-request="${r.id}" data-delete-request-name="${esc(r.descripcion || r.id)}">Eliminar</button>` : ""}
           </div>
         </td>
       </tr>`;
@@ -377,6 +379,18 @@ async function advanceRequest(id) {
   acceptData(await api("/api/requests/advance", { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken, id }) }));
   render();
   showToast("Solicitud avanzada");
+}
+
+async function deleteRequest(button) {
+  const id = button.dataset.deleteRequest;
+  const name = button.dataset.deleteRequestName || id;
+  const firstOk = await askConfirm(`Vas a eliminar el evento: ${name}. Esta accion lo quitara de la app y de la base de datos.`);
+  if (!firstOk) return;
+  const secondOk = await askConfirm(`Ultima confirmacion: seguro que quieres eliminar definitivamente este evento?`);
+  if (!secondOk) return;
+  acceptData(await api("/api/requests/delete", { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken, id }) }));
+  render();
+  showToast("Evento eliminado");
 }
 
 function settingsRows(type) {
@@ -523,6 +537,8 @@ document.addEventListener("click", async (event) => {
     if (edit) openEditRequest(edit.dataset.edit);
     const advance = event.target.closest("[data-advance]");
     if (advance) await advanceRequest(advance.dataset.advance);
+    const removeRequest = event.target.closest("[data-delete-request]");
+    if (removeRequest) await deleteRequest(removeRequest);
     const remove = event.target.closest("[data-delete-kind]");
     if (remove) await deleteSetting(remove);
   } catch (error) {
