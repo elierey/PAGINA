@@ -98,8 +98,14 @@
 
         <section class="table-card">
           <div class="table-head">
-            <h2>Solicitudes</h2>
-            <span id="requestCount">0 registros</span>
+            <div class="table-title">
+              <h2>Solicitudes</h2>
+              <span id="requestCount">0 registros</span>
+            </div>
+            <div class="table-actions">
+              <button class="ghost" id="sortBtn">Organizar</button>
+              <button class="ghost" id="exportBtn">Exportar</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -168,6 +174,39 @@
           <button class="tab" data-tab="users">Usuarios</button>
         </div>
         <div id="settingsContent"></div>
+      </section>
+    </dialog>
+
+    <dialog id="sortDialog">
+      <section class="modal compact-modal">
+        <div class="modal-head">
+          <h2>Organizar solicitudes</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <div class="choice-list">
+          <button type="button" class="ghost sort-choice" data-sort="amount">Monto: mayor a menor</button>
+          <button type="button" class="ghost sort-choice" data-sort="recent">Mas reciente</button>
+          <button type="button" class="ghost sort-choice" data-sort="reason">Razon</button>
+        </div>
+      </section>
+    </dialog>
+
+    <dialog id="exportDialog">
+      <section class="modal compact-modal">
+        <div class="modal-head">
+          <h2>Exportar solicitudes</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <p class="confirm-text">Elige las marcas que quieres incluir en el archivo CSV.</p>
+        <div class="export-tools">
+          <button type="button" class="ghost" id="selectAllBrands">Seleccionar todo</button>
+          <button type="button" class="ghost" id="clearAllBrands">Limpiar</button>
+        </div>
+        <div id="exportBrandList" class="check-list"></div>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button type="button" class="primary" id="downloadCsvBtn">Descargar CSV</button>
+        </div>
       </section>
     </dialog>
 

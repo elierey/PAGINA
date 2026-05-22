@@ -66,6 +66,7 @@ const state = {
   viewer: "",
   search: "",
   status: "",
+  sort: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -215,6 +216,15 @@ function visibleRequests() {
       r.estado,
     ].join(" ").toLowerCase().includes(needle));
   }
+  if (state.sort === "amount") {
+    rows.sort((a, b) => Number(b.monto || 0) - Number(a.monto || 0));
+  }
+  if (state.sort === "recent") {
+    rows.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+  }
+  if (state.sort === "reason") {
+    rows.sort((a, b) => String(a.razon || "").localeCompare(String(b.razon || ""), "es", { sensitivity: "base" }));
+  }
   return rows;
 }
 
@@ -323,6 +333,91 @@ function renderRequestOptions() {
   } else {
     $("requestBrand").disabled = false;
   }
+}
+
+function exportableBrands() {
+  const ids = [...new Set(visibleRequests().map((r) => r.marcaId).filter(Boolean))];
+  return ids
+    .map((id) => ({ id, nombre: brandName(id) }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+}
+
+function openSortDialog() {
+  $("sortDialog").showModal();
+}
+
+function applySort(mode) {
+  state.sort = mode;
+  renderMetrics();
+  renderRequests();
+  $("sortDialog").close();
+  const labels = { amount: "monto", recent: "fecha reciente", reason: "razon" };
+  showToast(`Solicitudes organizadas por ${labels[mode]}`);
+}
+
+function openExportDialog() {
+  const brands = exportableBrands();
+  $("exportBrandList").innerHTML = brands.length
+    ? brands.map((brand) => `
+      <label class="check-item">
+        <input type="checkbox" value="${esc(brand.id)}" checked>
+        <span>${esc(brand.nombre)}</span>
+      </label>`).join("")
+    : `<p class="confirm-text">No hay solicitudes visibles para exportar.</p>`;
+  $("downloadCsvBtn").disabled = brands.length === 0;
+  $("exportDialog").showModal();
+}
+
+function selectedExportBrandIds() {
+  return [...$("exportBrandList").querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function downloadCsv() {
+  const selected = new Set(selectedExportBrandIds());
+  if (!selected.size) {
+    showToast("Selecciona al menos una marca");
+    return;
+  }
+  const rows = visibleRequests().filter((request) => selected.has(request.marcaId));
+  if (!rows.length) {
+    showToast("No hay solicitudes para exportar");
+    return;
+  }
+  const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "Monto", "Recursos asignados", "Monto asignado", "Pagado", "Estado"];
+  const lines = [
+    headers.map(csvCell).join(";"),
+    ...rows.map((request) => [
+      brandName(request.marcaId),
+      request.razon,
+      request.descripcion,
+      request.detalle,
+      request.responsable,
+      request.fecha,
+      vendorName(request.proveedorId),
+      Number(request.monto || 0),
+      request.recursosAsignados ? "Si" : "No",
+      Number(request.montoAsignado || 0),
+      request.pagado ? "Si" : "No",
+      request.estado,
+    ].map(csvCell).join(";")),
+  ];
+  const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `solicitudes-eventos-${stamp}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  $("exportDialog").close();
+  showToast("CSV exportado");
 }
 
 function openNewRequest() {
@@ -529,6 +624,8 @@ document.addEventListener("click", async (event) => {
       settingsTab.classList.add("active");
       $("settingsContent").innerHTML = settingsRows(settingsTab.dataset.tab);
     }
+    const sortChoice = event.target.closest("[data-sort]");
+    if (sortChoice) applySort(sortChoice.dataset.sort);
     const edit = event.target.closest("[data-edit]");
     if (edit) openEditRequest(edit.dataset.edit);
     const advance = event.target.closest("[data-advance]");
@@ -546,6 +643,15 @@ document.addEventListener("click", async (event) => {
 $("refreshBtn").addEventListener("click", load);
 $("newRequestBtn").addEventListener("click", openNewRequest);
 $("settingsBtn").addEventListener("click", openSettings);
+$("sortBtn").addEventListener("click", openSortDialog);
+$("exportBtn").addEventListener("click", openExportDialog);
+$("downloadCsvBtn").addEventListener("click", downloadCsv);
+$("selectAllBrands").addEventListener("click", () => {
+  $("exportBrandList").querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = true; });
+});
+$("clearAllBrands").addEventListener("click", () => {
+  $("exportBrandList").querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+});
 $("logoutBtn").addEventListener("click", () => {
   storage.removeItem("polar_notion_email");
   storage.removeItem("polar_session_token");

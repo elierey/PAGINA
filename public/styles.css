@@ -298,11 +298,22 @@ h1 { margin-bottom: 8px; font-size: 46px; }
   margin-bottom: 22px;
 }
 .table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
   padding: 22px;
   min-height: 112px;
 }
 .table-head h2 { margin-bottom: 8px; font-size: 28px; }
 .table-head span { color: var(--muted); }
+.table-title { min-width: 0; }
+.table-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .table-wrap { overflow: auto; }
 table {
   width: 100%;
@@ -368,6 +379,7 @@ dialog {
 }
 dialog::backdrop { background: rgba(5, 24, 44, .45); }
 .modal { padding: 20px; }
+.compact-modal { max-width: 560px; }
 .confirm-modal { max-width: 460px; }
 .confirm-text {
   color: var(--muted);
@@ -463,6 +475,42 @@ label textarea {
   align-items: center;
   flex-wrap: wrap;
 }
+.choice-list {
+  display: grid;
+  gap: 10px;
+}
+.choice-list button {
+  justify-content: flex-start;
+  text-align: left;
+}
+.export-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 14px 0 10px;
+}
+.check-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+.check-item input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+}
 .error {
   background: #fff5f6;
   color: #8f1e28;
@@ -496,6 +544,8 @@ label textarea {
   main, aside { padding: 18px; }
   h1 { font-size: 36px; }
   .metrics, .filters, .form-grid { grid-template-columns: 1fr; }
+  .table-head { align-items: flex-start; flex-direction: column; }
+  .table-actions { justify-content: flex-start; }
   .settings-row,
   .settings-row.user,
   .settings-row.vendor { grid-template-columns: 1fr; }
