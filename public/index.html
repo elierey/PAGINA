@@ -198,9 +198,15 @@
           <button type="button" class="icon" data-close>&times;</button>
         </div>
         <p class="confirm-text">Elige las marcas que quieres incluir en el archivo CSV.</p>
+        <div class="date-filters">
+          <label>Dia especifico<input id="exportDay" type="date"></label>
+          <label>Desde<input id="exportFrom" type="date"></label>
+          <label>Hasta<input id="exportTo" type="date"></label>
+        </div>
         <div class="export-tools">
           <button type="button" class="ghost" id="selectAllBrands">Seleccionar todo</button>
           <button type="button" class="ghost" id="clearAllBrands">Limpiar</button>
+          <button type="button" class="ghost" id="clearExportDates">Limpiar fechas</button>
         </div>
         <div id="exportBrandList" class="check-list"></div>
         <div class="modal-actions">

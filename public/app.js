@@ -357,6 +357,9 @@ function applySort(mode) {
 
 function openExportDialog() {
   const brands = exportableBrands();
+  $("exportDay").value = "";
+  $("exportFrom").value = "";
+  $("exportTo").value = "";
   $("exportBrandList").innerHTML = brands.length
     ? brands.map((brand) => `
       <label class="check-item">
@@ -372,6 +375,24 @@ function selectedExportBrandIds() {
   return [...$("exportBrandList").querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
 }
 
+function exportDateRange() {
+  const day = $("exportDay").value;
+  if (day) return { from: day, to: day };
+  return {
+    from: $("exportFrom").value,
+    to: $("exportTo").value,
+  };
+}
+
+function isWithinExportDates(request) {
+  const date = String(request.fecha || "").slice(0, 10);
+  const { from, to } = exportDateRange();
+  if (!date) return !from && !to;
+  if (from && date < from) return false;
+  if (to && date > to) return false;
+  return true;
+}
+
 function csvCell(value) {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
@@ -383,9 +404,9 @@ function downloadCsv() {
     showToast("Selecciona al menos una marca");
     return;
   }
-  const rows = visibleRequests().filter((request) => selected.has(request.marcaId));
+  const rows = visibleRequests().filter((request) => selected.has(request.marcaId) && isWithinExportDates(request));
   if (!rows.length) {
-    showToast("No hay solicitudes para exportar");
+    showToast("No hay solicitudes para exportar con esos filtros");
     return;
   }
   const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "Monto", "Recursos asignados", "Monto asignado", "Pagado", "Estado"];
@@ -651,6 +672,22 @@ $("selectAllBrands").addEventListener("click", () => {
 });
 $("clearAllBrands").addEventListener("click", () => {
   $("exportBrandList").querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+});
+$("clearExportDates").addEventListener("click", () => {
+  $("exportDay").value = "";
+  $("exportFrom").value = "";
+  $("exportTo").value = "";
+});
+$("exportDay").addEventListener("change", () => {
+  if ($("exportDay").value) {
+    $("exportFrom").value = "";
+    $("exportTo").value = "";
+  }
+});
+["exportFrom", "exportTo"].forEach((id) => {
+  $(id).addEventListener("change", () => {
+    if ($(id).value) $("exportDay").value = "";
+  });
 });
 $("logoutBtn").addEventListener("click", () => {
   storage.removeItem("polar_notion_email");
