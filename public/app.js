@@ -401,7 +401,7 @@ function settingsRows(type) {
         <label>Proveedor<input name="nombre" value="${v.nombre || ""}"></label>
         <label>Servicio<input name="servicio" value="${v.servicio || ""}"></label>
         <label>Contacto<input name="contacto" value="${v.contacto || ""}"></label>
-        <label>Telefono<input name="telefono" value="${v.telefono || ""}"></label>
+        <label>Correo<input name="telefono" value="${v.telefono || ""}"></label>
         <div class="setting-actions">
           <button class="ghost" type="submit">Guardar</button>
           <button class="danger" type="button" data-delete-kind="vendor" data-delete-id="${v.id}" data-delete-name="${v.nombre || v.id}">Eliminar</button>
@@ -431,7 +431,7 @@ function newBrandForm() {
 }
 
 function newVendorForm() {
-  return `<form class="settings-row vendor" data-kind="vendor-new"><label>Nuevo proveedor<input name="nombre"></label><label>Servicio<input name="servicio"></label><label>Contacto<input name="contacto"></label><label>Telefono<input name="telefono"></label><button class="primary">Agregar</button></form>`;
+  return `<form class="settings-row vendor" data-kind="vendor-new"><label>Nuevo proveedor<input name="nombre"></label><label>Servicio<input name="servicio"></label><label>Contacto<input name="contacto"></label><label>Correo<input name="telefono"></label><button class="primary">Agregar</button></form>`;
 }
 
 function newUserForm() {
