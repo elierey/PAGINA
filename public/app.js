@@ -59,7 +59,6 @@ const storage = (() => {
 
 const state = {
   email: storage.getItem("polar_notion_email") || "",
-  sessionToken: storage.getItem("polar_session_token") || "",
   password: "",
   data: null,
   currentView: "admin",
@@ -151,15 +150,12 @@ function acceptData(data) {
     state.email = data.user.email;
     storage.setItem("polar_notion_email", state.email);
   }
-  if (data.sessionToken) {
-    state.sessionToken = data.sessionToken;
-    storage.setItem("polar_session_token", state.sessionToken);
-  }
 }
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
   });
   const data = await response.json();
@@ -173,12 +169,10 @@ async function load() {
   try {
     const data = await api("/api/bootstrap", {
       method: "POST",
-      body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken }),
+      body: JSON.stringify({ email: state.email, password: state.password }),
     });
     if (!data.authorized) {
       storage.removeItem("polar_notion_email");
-      storage.removeItem("polar_session_token");
-      state.sessionToken = "";
       $("app").classList.add("hidden");
       $("login").classList.remove("hidden");
       $("emailInput").value = state.email || "";
@@ -481,14 +475,14 @@ async function saveRequest(event) {
     detalle: $("requestDetail").value,
   };
   const path = request.id ? "/api/requests/update" : "/api/requests";
-  acceptData(await api(path, { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken, request }) }));
+  acceptData(await api(path, { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, request }) }));
   $("requestDialog").close();
   render();
   showToast(request.id ? "Solicitud actualizada" : "Solicitud creada");
 }
 
 async function advanceRequest(id) {
-  acceptData(await api("/api/requests/advance", { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken, id }) }));
+  acceptData(await api("/api/requests/advance", { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, id }) }));
   render();
   showToast("Solicitud avanzada");
 }
@@ -500,7 +494,7 @@ async function deleteRequest(button) {
   if (!firstOk) return;
   const secondOk = await askConfirm(`Ultima confirmacion: seguro que quieres eliminar definitivamente este evento?`);
   if (!secondOk) return;
-  acceptData(await api("/api/requests/delete", { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken, id }) }));
+  acceptData(await api("/api/requests/delete", { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, id }) }));
   render();
   showToast("Evento eliminado");
 }
@@ -542,7 +536,7 @@ function settingsRows(type) {
       <label>Email<input name="email" value="${esc(u.email)}"></label>
       <label>Rol<select name="rol">${["admin", "marca", "proveedor"].map((r) => `<option ${u.rol === r ? "selected" : ""}>${r}</option>`).join("")}</select></label>
       <label>Entidad ID<input name="entidadId" value="${esc(u.entidadId)}"></label>
-      <label>Contrasena<input name="password" value="${esc(u.password || "POLAR2026")}"></label>
+      <label>Contrasena<input name="password" placeholder="Dejar vacia para mantener"></label>
       <label class="check"><input name="activo" type="checkbox" ${u.activo ? "checked" : ""}> Activo</label>
       <div class="setting-actions">
         <button class="ghost" type="submit">Guardar</button>
@@ -582,8 +576,8 @@ async function saveSetting(form) {
   if (kind === "vendor-new") { path = "/api/vendors"; body = { vendor: data }; }
   if (kind === "user") { path = "/api/users/update"; body = { user: data }; }
   if (kind === "user-new") { path = "/api/users"; body = { user: data }; }
-  acceptData(await api(path, { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken, ...body }) }));
-  if (kind === "user" && [data.originalEmail, data.email].includes(state.email)) state.password = data.password || "POLAR2026";
+  acceptData(await api(path, { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, ...body }) }));
+  if (kind === "user" && [data.originalEmail, data.email].includes(state.email) && data.password) state.password = data.password;
   render();
   $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
   showToast("Configuracion guardada");
@@ -602,7 +596,7 @@ async function deleteSetting(button) {
     user: "/api/users/delete",
   };
   const payload = kind === "user" ? { userEmail: id } : { id };
-  acceptData(await api(paths[kind], { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, sessionToken: state.sessionToken, ...payload }) }));
+  acceptData(await api(paths[kind], { method: "POST", body: JSON.stringify({ email: state.email, password: state.password, ...payload }) }));
   render();
   $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
   showToast("Registro eliminado");
@@ -614,8 +608,6 @@ document.addEventListener("submit", async (event) => {
       event.preventDefault();
       state.email = $("emailInput").value.trim().toLowerCase();
       state.password = $("passwordInput").value;
-      state.sessionToken = "";
-      storage.removeItem("polar_session_token");
       await load();
     }
     if (event.target.id === "requestForm") await saveRequest(event);
@@ -689,11 +681,12 @@ $("exportDay").addEventListener("change", () => {
     if ($(id).value) $("exportDay").value = "";
   });
 });
-$("logoutBtn").addEventListener("click", () => {
+$("logoutBtn").addEventListener("click", async () => {
+  try {
+    await api("/api/logout", { method: "POST", body: JSON.stringify({ email: state.email }) });
+  } catch {}
   storage.removeItem("polar_notion_email");
-  storage.removeItem("polar_session_token");
   state.email = "";
-  state.sessionToken = "";
   state.password = "";
   state.data = null;
   $("app").classList.add("hidden");
@@ -722,4 +715,4 @@ $("togglePasswordBtn").addEventListener("click", () => {
 });
 
 if (state.email) $("emailInput").value = state.email;
-if (state.sessionToken) load();
+if (state.email) load();

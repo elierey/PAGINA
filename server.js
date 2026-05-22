@@ -6,12 +6,30 @@ const crypto = require("crypto");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const NOTION_VERSION = "2022-06-28";
 const DEFAULT_PASSWORD = "POLAR2026";
+const SESSION_COOKIE = "polar_session";
+const SESSION_DAYS = 7;
+const BODY_LIMIT_BYTES = 256 * 1024;
+const RATE_WINDOW_MS = 60 * 1000;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 
 loadEnvFile();
+
+function csv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
 
 const PORT = Number(process.env.PORT || 4180);
 const CONFIG = {
   token: process.env.NOTION_TOKEN || "",
+  appMode: process.env.APP_MODE || "standard",
+  sessionSecret: process.env.SESSION_SECRET || "",
+  allowedEmailDomains: csv(process.env.ALLOWED_EMAIL_DOMAINS || ""),
+  allowedEmails: csv(process.env.ALLOWED_EMAILS || ""),
+  auditEnabled: process.env.AUDIT_LOG !== "false",
+  secureCookies: process.env.NODE_ENV === "production" || process.env.SECURE_COOKIES === "true",
   db: {
     requests: cleanNotionId(process.env.NOTION_DB_SOLICITUDES || "21ae3d021d1b4344b05c28c9ee7eba44"),
     brands: cleanNotionId(process.env.NOTION_DB_MARCAS || "a11d78243cd941039e27f810969f8942"),
@@ -26,7 +44,15 @@ const CONFIG = {
   ],
 };
 
+if (!CONFIG.sessionSecret) {
+  CONFIG.sessionSecret = crypto
+    .createHash("sha256")
+    .update(`${CONFIG.token || "polar-local-session"}:${__dirname}`)
+    .digest("hex");
+}
+
 let usersPasswordSchemaReady = false;
+const rateBuckets = new Map();
 
 function loadEnvFile() {
   const file = path.join(__dirname, ".env");
@@ -45,6 +71,10 @@ const mime = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
 };
 
 function cleanEmail(value) {
@@ -65,12 +95,41 @@ function cleanPassword(value) {
   return String(value || "").trim();
 }
 
+function isHashedPassword(value) {
+  return String(value || "").startsWith("pbkdf2$");
+}
+
+function hashPassword(value) {
+  const salt = crypto.randomBytes(16).toString("base64url");
+  const iterations = 120000;
+  const digest = crypto.pbkdf2Sync(cleanPassword(value || DEFAULT_PASSWORD), salt, iterations, 32, "sha256").toString("base64url");
+  return `pbkdf2$${iterations}$${salt}$${digest}`;
+}
+
+function verifyPassword(input, stored) {
+  const candidate = cleanPassword(input);
+  const expected = cleanPassword(stored || DEFAULT_PASSWORD);
+  if (!isHashedPassword(expected)) return candidate === expected;
+  const [, iterationsValue, salt, digest] = expected.split("$");
+  const iterations = Number(iterationsValue || 0);
+  if (!iterations || !salt || !digest) return false;
+  const candidateDigest = crypto.pbkdf2Sync(candidate, salt, iterations, 32, "sha256").toString("base64url");
+  if (candidateDigest.length !== digest.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(candidateDigest), Buffer.from(digest));
+}
+
+function publicUser(user) {
+  const { password, ...safeUser } = user;
+  safeUser.passwordConfigured = Boolean(password);
+  return safeUser;
+}
+
 function base64url(value) {
   return Buffer.from(value).toString("base64url");
 }
 
 function signSessionPayload(payload) {
-  return crypto.createHmac("sha256", CONFIG.token || "polar-local-session").update(payload).digest("base64url");
+  return crypto.createHmac("sha256", CONFIG.sessionSecret).update(payload).digest("base64url");
 }
 
 function createSessionToken(emailValue) {
@@ -93,6 +152,42 @@ function readSessionToken(token) {
   }
 }
 
+function parseCookies(req) {
+  return String(req.headers.cookie || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((cookies, part) => {
+      const index = part.indexOf("=");
+      if (index === -1) return cookies;
+      cookies[decodeURIComponent(part.slice(0, index))] = decodeURIComponent(part.slice(index + 1));
+      return cookies;
+    }, {});
+}
+
+function readSessionFromRequest(req, body = {}) {
+  const cookies = parseCookies(req);
+  return body.sessionToken || cookies[SESSION_COOKIE] || "";
+}
+
+function sessionCookie(token) {
+  const parts = [
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    `Max-Age=${SESSION_DAYS * 24 * 60 * 60}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+  ];
+  if (CONFIG.secureCookies) parts.push("Secure");
+  return parts.join("; ");
+}
+
+function clearSessionCookie() {
+  const parts = [`${SESSION_COOKIE}=`, "Max-Age=0", "Path=/", "HttpOnly", "SameSite=Strict"];
+  if (CONFIG.secureCookies) parts.push("Secure");
+  return parts.join("; ");
+}
+
 function idFromName(value, existing = []) {
   const base = String(value || "registro")
     .toLowerCase()
@@ -109,6 +204,69 @@ function idFromName(value, existing = []) {
 
 function nowString() {
   return new Date().toISOString().replace("T", " ").slice(0, 19);
+}
+
+function clientIp(req) {
+  return String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+}
+
+function limitRate(key, max, windowMs) {
+  const now = Date.now();
+  const bucket = rateBuckets.get(key) || { count: 0, reset: now + windowMs };
+  if (bucket.reset < now) {
+    bucket.count = 0;
+    bucket.reset = now + windowMs;
+  }
+  bucket.count += 1;
+  rateBuckets.set(key, bucket);
+  if (bucket.count > max) {
+    const error = new Error("Demasiados intentos. Espera unos minutos y vuelve a intentar.");
+    error.statusCode = 429;
+    throw error;
+  }
+}
+
+function emailAllowed(emailValue) {
+  const email = cleanEmail(emailValue);
+  const domain = email.split("@")[1] || "";
+  if (CONFIG.allowedEmails.includes(email)) return true;
+  if (!CONFIG.allowedEmailDomains.length) return true;
+  return CONFIG.allowedEmailDomains.includes(domain);
+}
+
+function audit(req, action, ctx = {}, detail = {}) {
+  if (!CONFIG.auditEnabled) return;
+  const entry = {
+    at: new Date().toISOString(),
+    action,
+    ip: req ? clientIp(req) : "",
+    email: cleanEmail(ctx.email || detail.email || ""),
+    role: ctx.role || "",
+    target: detail.target || "",
+    result: detail.result || "ok",
+  };
+  console.log(`[audit] ${JSON.stringify(entry)}`);
+}
+
+function securityHeaders(contentType, extra = {}) {
+  return {
+    "Content-Type": contentType,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "img-src 'self' data:",
+      "connect-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join("; "),
+    ...extra,
+  };
 }
 
 function notionHeaders() {
@@ -292,12 +450,13 @@ function contextFor(emailValue, users, passwordValue, requirePassword = false, s
   const session = readSessionToken(sessionToken);
   const email = cleanEmail(session?.email || emailValue);
   if (!email) return { authorized: false, email, message: "Escribe el correo autorizado para entrar." };
+  if (!emailAllowed(email)) return { authorized: false, email, message: "Este correo no pertenece al dominio autorizado para esta version formal." };
   const user = users.find((x) => x.email === email && x.activo);
   const isSuperAdmin = CONFIG.superAdmins.includes(email);
   if (!user && !isSuperAdmin) return { authorized: false, email, message: `El correo ${email} no esta activo en Usuarios y accesos - Polar.` };
   if (requirePassword && !session) {
-    const expected = cleanPassword(user?.password || DEFAULT_PASSWORD);
-    if (cleanPassword(passwordValue) !== expected) return { authorized: false, email, message: "Contrasena incorrecta." };
+    const expected = user?.password || DEFAULT_PASSWORD;
+    if (!verifyPassword(passwordValue, expected)) return { authorized: false, email, message: "Contrasena incorrecta." };
   }
   if (isSuperAdmin) return { authorized: true, email, role: "admin", entidadId: user?.entidadId || "", nombre: user?.nombre || email.split("@")[0] };
   if (!user) return { authorized: false, email, message: `El correo ${email} no esta activo en Usuarios y accesos - Polar.` };
@@ -340,9 +499,15 @@ async function payload(emailValue, passwordValue, requirePassword = true, sessio
     vendors: visibleVendors,
     allBrands: ctx.role === "admin" ? activeBrands : visibleBrands,
     allVendors: ctx.role === "admin" || ctx.role === "marca" ? activeVendors : visibleVendors,
-    allUsers: ctx.role === "admin" ? data.users : [],
+    allUsers: ctx.role === "admin" ? data.users.map(publicUser) : [],
     requests,
-    sessionToken: createSessionToken(ctx.email),
+    sessionToken: "",
+    security: {
+      mode: CONFIG.appMode,
+      allowedEmailDomains: CONFIG.allowedEmailDomains,
+      session: "httpOnly-cookie",
+      audit: CONFIG.auditEnabled,
+    },
     stats: stats(requests),
   };
 }
@@ -352,10 +517,57 @@ function requireRole(ctx, roles) {
   if (!roles.includes(ctx.role)) throw new Error("No tienes permiso para realizar esta accion.");
 }
 
-async function getContextFromBody(body) {
+async function getContextFromBody(req, body) {
   const data = await loadAll();
-  const ctx = contextFor(body.email, data.users, body.password, true, body.sessionToken);
+  const ctx = contextFor(body.email, data.users, body.password, true, readSessionFromRequest(req, body));
   return { data, ctx };
+}
+
+async function responsePayload(req, body, passwordValue = body.password) {
+  return payload(body.email, passwordValue, true, readSessionFromRequest(req, body));
+}
+
+function requireText(value, label) {
+  if (!String(value || "").trim()) throw new Error(`${label} es obligatorio.`);
+}
+
+function requireDate(value, label) {
+  const text = String(value || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error(`${label} debe tener una fecha valida.`);
+}
+
+function requireAmount(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error("El monto debe ser un numero positivo.");
+  if (amount > 100000000) throw new Error("El monto supera el limite permitido para revision.");
+}
+
+function validateRequestInput(request, ctx) {
+  if (ctx.role === "admin") requireText(request.marcaId, "Marca");
+  requireText(request.razon, "Razon");
+  requireText(request.descripcion, "Descripcion");
+  requireText(request.responsable, "Responsable");
+  requireDate(request.fecha, "Fecha");
+  requireText(request.proveedorId, "Proveedor");
+  requireAmount(request.monto);
+}
+
+function validateBrandInput(item) {
+  requireText(item.nombre, "Marca");
+  requireText(item.area, "Razon");
+}
+
+function validateVendorInput(item) {
+  requireText(item.nombre, "Proveedor");
+  requireText(item.servicio, "Servicio");
+}
+
+function validateUserInput(item) {
+  requireText(item.nombre || item.email, "Nombre");
+  const mail = cleanEmail(item.email);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) throw new Error("Email invalido.");
+  if (!["admin", "marca", "proveedor"].includes(String(item.rol || "").toLowerCase())) throw new Error("Rol invalido.");
+  if (!emailAllowed(mail)) throw new Error("El usuario debe pertenecer al dominio o lista permitida.");
 }
 
 function requestProps(p, ctx, isUpdate = false) {
@@ -391,41 +603,58 @@ async function handleApi(req, res, pathname, body, query) {
   if (pathname === "/api/bootstrap" && (req.method === "GET" || req.method === "POST")) {
     const emailValue = req.method === "GET" ? query.get("email") : body.email;
     const passwordValue = req.method === "GET" ? query.get("password") : body.password;
-    const sessionToken = req.method === "GET" ? query.get("sessionToken") : body.sessionToken;
-    return sendJson(res, await payload(emailValue, passwordValue, true, sessionToken));
+    const sessionToken = req.method === "GET" ? query.get("sessionToken") : readSessionFromRequest(req, body);
+    limitRate(`login:${clientIp(req)}:${cleanEmail(emailValue)}`, 8, LOGIN_WINDOW_MS);
+    const data = await payload(emailValue, passwordValue, true, sessionToken);
+    if (data.authorized) {
+      const token = createSessionToken(data.user.email);
+      audit(req, "login", data.user, { target: "session", result: "ok" });
+      return sendJson(res, data, 200, { "Set-Cookie": sessionCookie(token) });
+    }
+    audit(req, "login", { email: emailValue }, { target: "session", result: "denied" });
+    return sendJson(res, data);
+  }
+
+  if (pathname === "/api/logout" && req.method === "POST") {
+    audit(req, "logout", { email: body.email || "" }, { target: "session" });
+    return sendJson(res, { ok: true }, 200, { "Set-Cookie": clearSessionCookie() });
   }
 
   if (pathname === "/api/requests" && req.method === "POST") {
-    const { ctx } = await getContextFromBody(body);
+    const { ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin", "marca"]);
+    validateRequestInput(body.request || {}, ctx);
     await notion("/pages", {
       method: "POST",
       body: JSON.stringify({ parent: { database_id: CONFIG.db.requests }, properties: requestProps(body.request || {}, ctx) }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "request.create", ctx, { target: body.request?.descripcion || "solicitud" });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/requests/update" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin", "marca"]);
     const current = data.requests.find((x) => x.id === body.request.id || x.notionPageId === body.request.notionPageId);
     if (!current) throw new Error("Solicitud no encontrada.");
     if (ctx.role === "marca" && current.marcaId !== ctx.entidadId) throw new Error("No puedes editar solicitudes de otra marca.");
+    validateRequestInput({ ...current, ...(body.request || {}) }, ctx);
     await notion(`/pages/${current.notionPageId}`, {
       method: "PATCH",
       body: JSON.stringify({ properties: requestProps({ ...current, ...(body.request || {}) }, ctx, true) }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "request.update", ctx, { target: current.id });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/requests/advance" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const current = data.requests.find((x) => x.id === body.id || x.notionPageId === body.id);
     if (!current) throw new Error("Solicitud no encontrada.");
     const flow = ["Solicitado", "Cotizando", "Aprobado", "Recursos asignados", "Pagado"];
     const next = flow[flow.indexOf(current.estado) + 1];
-    if (!next) return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    if (!next) return sendJson(res, await responsePayload(req, body));
     const patch = {
       "Estado": select(next),
       "Actualizado en": richText(nowString()),
@@ -440,11 +669,12 @@ async function handleApi(req, res, pathname, body, query) {
       patch["Monto asignado"] = number(current.montoAsignado || current.monto);
     }
     await notion(`/pages/${current.notionPageId}`, { method: "PATCH", body: JSON.stringify({ properties: patch }) });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "request.advance", ctx, { target: `${current.id}:${next}` });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/requests/delete" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const current = data.requests.find((x) => x.id === body.id || x.notionPageId === body.id);
     if (!current) throw new Error("Solicitud no encontrada.");
@@ -452,13 +682,15 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "request.delete", ctx, { target: current.id });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/brands" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const item = body.brand || {};
+    validateBrandInput(item);
     await notion("/pages", {
       method: "POST",
       body: JSON.stringify({
@@ -471,36 +703,41 @@ async function handleApi(req, res, pathname, body, query) {
         },
       }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "brand.create", ctx, { target: item.nombre });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/brands/update" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const item = body.brand || {};
+    validateBrandInput(item);
     const pageId = await findPageId(data.brands, item.id);
     await notion(`/pages/${pageId}`, {
       method: "PATCH",
       body: JSON.stringify({ properties: { "Marca": title(item.nombre || ""), "Area": richText(item.area || ""), "Activo": checkbox(true) } }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "brand.update", ctx, { target: item.id });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/brands/delete" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const pageId = await findPageId(data.brands, body.id);
     await notion(`/pages/${pageId}`, {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "brand.delete", ctx, { target: body.id });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/vendors" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const item = body.vendor || {};
+    validateVendorInput(item);
     await notion("/pages", {
       method: "POST",
       body: JSON.stringify({
@@ -515,37 +752,42 @@ async function handleApi(req, res, pathname, body, query) {
         },
       }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "vendor.create", ctx, { target: item.nombre });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/vendors/update" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const item = body.vendor || {};
+    validateVendorInput(item);
     const pageId = await findPageId(data.vendors, item.id);
     await notion(`/pages/${pageId}`, {
       method: "PATCH",
       body: JSON.stringify({ properties: { "Proveedor": title(item.nombre || ""), "Servicio": richText(item.servicio || ""), "Contacto": richText(item.contacto || ""), "Telefono": phone(item.telefono || ""), "Activo": checkbox(true) } }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "vendor.update", ctx, { target: item.id });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/vendors/delete" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const pageId = await findPageId(data.vendors, body.id);
     await notion(`/pages/${pageId}`, {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "vendor.delete", ctx, { target: body.id });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/users" && req.method === "POST") {
-    const { ctx } = await getContextFromBody(body);
+    const { ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     await ensureUsersPasswordSchema();
     const item = body.user || {};
+    validateUserInput(item);
     await notion("/pages", {
       method: "POST",
       body: JSON.stringify({
@@ -555,44 +797,44 @@ async function handleApi(req, res, pathname, body, query) {
           "Email": email(item.email || ""),
           "Rol": select(item.rol || "marca"),
           "Entidad ID": richText(item.entidadId || ""),
-          "Password": richText(item.password || DEFAULT_PASSWORD),
+          "Password": richText(hashPassword(item.password || DEFAULT_PASSWORD)),
           "Activo": checkbox(item.activo !== false),
           "Notas": richText(item.notas || ""),
         },
       }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "user.create", ctx, { target: cleanEmail(item.email) });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/users/update" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     await ensureUsersPasswordSchema();
     const item = body.user || {};
+    validateUserInput(item);
     const clean = cleanEmail(item.originalEmail || item.email);
     const current = data.users.find((x) => x.email === clean || x.notionPageId === item.notionPageId);
     if (!current) throw new Error("Usuario no encontrado.");
+    const properties = {
+      "Nombre": title(item.nombre || item.email || ""),
+      "Email": email(item.email || ""),
+      "Rol": select(item.rol || "marca"),
+      "Entidad ID": richText(item.entidadId || ""),
+      "Activo": checkbox(item.activo),
+      "Notas": richText(item.notas || ""),
+    };
+    if (cleanPassword(item.password)) properties["Password"] = richText(hashPassword(item.password));
     await notion(`/pages/${current.notionPageId}`, {
       method: "PATCH",
-      body: JSON.stringify({
-        properties: {
-          "Nombre": title(item.nombre || item.email || ""),
-          "Email": email(item.email || ""),
-          "Rol": select(item.rol || "marca"),
-          "Entidad ID": richText(item.entidadId || ""),
-          "Password": richText(item.password || DEFAULT_PASSWORD),
-          "Activo": checkbox(item.activo),
-          "Notas": richText(item.notas || ""),
-        },
-      }),
+      body: JSON.stringify({ properties }),
     });
-    const nextPassword = cleanEmail(item.email) === ctx.email ? item.password || DEFAULT_PASSWORD : body.password;
-    const nextToken = cleanEmail(item.email) === ctx.email ? "" : body.sessionToken;
-    return sendJson(res, await payload(body.email, nextPassword, true, nextToken));
+    audit(req, "user.update", ctx, { target: cleanEmail(item.email) });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   if (pathname === "/api/users/delete" && req.method === "POST") {
-    const { data, ctx } = await getContextFromBody(body);
+    const { data, ctx } = await getContextFromBody(req, body);
     requireRole(ctx, ["admin"]);
     const clean = cleanEmail(body.userEmail);
     if (clean === ctx.email && !CONFIG.superAdmins.includes(ctx.email)) {
@@ -604,14 +846,18 @@ async function handleApi(req, res, pathname, body, query) {
       method: "PATCH",
       body: JSON.stringify({ archived: true }),
     });
-    return sendJson(res, await payload(body.email, body.password, true, body.sessionToken));
+    audit(req, "user.delete", ctx, { target: clean });
+    return sendJson(res, await responsePayload(req, body));
   }
 
   throw Object.assign(new Error("Ruta no encontrada."), { statusCode: 404 });
 }
 
-function sendJson(res, data, statusCode = 200) {
-  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+function sendJson(res, data, statusCode = 200, headers = {}) {
+  res.writeHead(statusCode, securityHeaders("application/json; charset=utf-8", {
+    "Cache-Control": "no-store",
+    ...headers,
+  }));
   res.end(JSON.stringify(data));
 }
 
@@ -629,7 +875,8 @@ function serveStatic(req, res, pathname) {
       res.end("Not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": mime[path.extname(file)] || "application/octet-stream" });
+    const cache = path.extname(file) === ".html" ? "no-store" : "public, max-age=3600";
+    res.writeHead(200, securityHeaders(mime[path.extname(file)] || "application/octet-stream", { "Cache-Control": cache }));
     res.end(data);
   });
 }
@@ -639,7 +886,10 @@ function readBody(req) {
     let raw = "";
     req.on("data", (chunk) => {
       raw += chunk;
-      if (raw.length > 2_000_000) req.destroy();
+      if (raw.length > BODY_LIMIT_BYTES) {
+        reject(Object.assign(new Error("La solicitud es demasiado grande."), { statusCode: 413 }));
+        req.destroy();
+      }
     });
     req.on("end", () => {
       try {
@@ -655,12 +905,17 @@ function readBody(req) {
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
+    limitRate(`${clientIp(req)}:${url.pathname}`, 180, RATE_WINDOW_MS);
+    if (url.pathname === "/healthz") {
+      return sendJson(res, { ok: true, mode: CONFIG.appMode });
+    }
     if (url.pathname.startsWith("/api/")) {
       const body = req.method === "GET" ? {} : await readBody(req);
       return await handleApi(req, res, url.pathname, body, url.searchParams);
     }
     serveStatic(req, res, url.pathname);
   } catch (error) {
+    audit(req, "error", {}, { target: url.pathname, result: error.message || "error" });
     sendJson(res, { ok: false, message: error.message || "Error interno" }, error.statusCode || 500);
   }
 }).listen(PORT, () => {
