@@ -1,0 +1,976 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        --bg: #eef4f8;
+        --surface: #ffffff;
+        --soft: #f6f9fb;
+        --ink: #10243a;
+        --muted: #5a6d7f;
+        --line: #d7e4ef;
+        --blue: #0064aa;
+        --deep: #004477;
+        --red: #ef3340;
+        --green: #00865a;
+        --gold: #d8a629;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--bg);
+        font-family: Montserrat, "Avenir Next", Aptos, "Segoe UI", Arial, sans-serif;
+      }
+      button, input, select, textarea { font: inherit; }
+      button { cursor: pointer; }
+      .hidden { display: none !important; }
+      .login {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: radial-gradient(circle at 70% 20%, rgba(216,166,41,.16), transparent 34%), var(--bg);
+      }
+      .login-card {
+        width: min(560px, 100%);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 34px;
+        box-shadow: 0 28px 80px rgba(0, 68, 119, .14);
+      }
+      .logo-card {
+        width: 168px;
+        min-height: 82px;
+        display: grid;
+        place-items: center;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #eef2f5;
+        box-shadow: 0 18px 45px rgba(0, 68, 119, .10);
+        color: var(--deep);
+        font-weight: 950;
+        line-height: .95;
+        letter-spacing: .02em;
+        text-align: center;
+      }
+      .logo-card img {
+        display: block;
+        width: 88%;
+        max-height: 70px;
+        object-fit: contain;
+      }
+      .logo-card span { display: none; }
+      .login-card h1 { margin: 22px 0 10px; font-size: clamp(2rem, 6vw, 3.3rem); line-height: 1; }
+      .login-card p { color: var(--muted); margin: 0; line-height: 1.5; }
+      .shell { display: grid; grid-template-columns: 292px minmax(0, 1fr); min-height: 100vh; }
+      aside {
+        background: linear-gradient(180deg, var(--deep), #052b4d);
+        color: #fff;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .brand-lockup { display: grid; gap: 14px; }
+      .brand-lockup .logo-card { width: 148px; min-height: 78px; font-size: .86rem; }
+      .role-card, .access-card, .viewer-panel {
+        border: 1px solid rgba(255,255,255,.15);
+        background: rgba(255,255,255,.08);
+        border-radius: 8px;
+        padding: 15px;
+      }
+      .role-card span, .access-card span { color: #dbeaf4; display: block; margin-top: 6px; font-size: .9rem; line-height: 1.35; }
+      .role-switcher { display: grid; gap: 10px; }
+      .role-button {
+        min-height: 48px;
+        border: 1px solid rgba(255,255,255,.16);
+        background: rgba(255,255,255,.08);
+        color: #fff;
+        border-radius: 8px;
+        padding: 0 14px;
+        font-weight: 850;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .role-button.active { background: #fff; color: var(--deep); }
+      .role-button span {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        display: grid;
+        place-items: center;
+        background: rgba(255,255,255,.14);
+        font-size: .8rem;
+      }
+      .viewer-panel label { color: #dbeaf4; font-size: .85rem; }
+      main { padding: 30px; min-width: 0; }
+      header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 22px; }
+      .eyebrow { margin: 0 0 7px; color: var(--blue); text-transform: uppercase; font-weight: 900; letter-spacing: .08em; font-size: .78rem; }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 { margin-bottom: 9px; font-size: clamp(2rem, 3.5vw, 3.4rem); line-height: 1; }
+      .muted { color: var(--muted); }
+      .actions, .table-actions, .row-actions, .setting-actions, .export-tools { display: flex; gap: 10px; flex-wrap: wrap; }
+      .primary, .ghost, .danger {
+        min-height: 44px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        padding: 0 16px;
+        font-weight: 850;
+      }
+      .primary { background: var(--blue); color: #fff; }
+      .ghost { background: #fff; border-color: var(--line); color: var(--ink); }
+      .danger { color: #8f1e28; background: #fff0f2; border-color: #ffd3d7; }
+      .icon { width: 42px; height: 42px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font-size: 1.4rem; }
+      .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+      .metric {
+        background: #fff;
+        border-radius: 8px;
+        padding: 20px;
+        border-top: 4px solid var(--blue);
+        box-shadow: 0 18px 55px rgba(0, 68, 119, .10);
+      }
+      .metric:nth-child(3) { border-color: var(--gold); }
+      .metric:nth-child(4) { border-color: var(--red); }
+      .metric span { color: var(--muted); display: block; margin-bottom: 13px; }
+      .metric strong { font-size: 1.55rem; }
+      .filters {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) 280px;
+        gap: 12px;
+        background: rgba(255,255,255,.78);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        margin-bottom: 18px;
+      }
+      input, select, textarea {
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+        color: var(--ink);
+        background: #fff;
+      }
+      .table-card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 18px;
+        box-shadow: 0 18px 55px rgba(0, 68, 119, .10);
+      }
+      .table-head {
+        min-height: 88px;
+        padding: 20px 22px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .table-title h2 { margin-bottom: 8px; font-size: 1.85rem; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; min-width: 1120px; border-collapse: collapse; }
+      th, td { padding: 14px 17px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { background: var(--blue); color: #fff; text-transform: uppercase; font-size: .78rem; letter-spacing: .03em; }
+      .sub { color: var(--muted); margin-top: 6px; line-height: 1.35; }
+      .pill { display: inline-flex; min-height: 30px; align-items: center; border-radius: 999px; padding: 0 12px; font-weight: 900; font-size: .82rem; }
+      .pill.ok { background: var(--green); color: #fff; }
+      .pill.bad { background: #ffe1e4; color: #8f1e28; }
+      .pill.paid { background: #d9f1e7; color: #00513a; }
+      .vendor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 18px; }
+      .vendor-item { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--soft); }
+      dialog { border: 0; border-radius: 8px; padding: 0; width: min(900px, calc(100vw - 30px)); box-shadow: 0 28px 80px rgba(0,0,0,.28); }
+      dialog.wide { width: min(1120px, calc(100vw - 30px)); }
+      dialog::backdrop { background: rgba(0, 39, 72, .58); }
+      .modal { padding: 22px; max-height: 86vh; overflow: auto; background: #fff; display: grid; gap: 16px; }
+      .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+      .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      label { display: grid; gap: 7px; color: var(--ink); font-weight: 850; }
+      label.check { display: flex; align-items: center; gap: 10px; }
+      label.check input { width: auto; min-height: 0; }
+      .settings-tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+      .tab.active { background: var(--blue); color: #fff; }
+      .settings-list { display: grid; gap: 12px; }
+      .settings-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(160px, 1fr)) auto;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--soft);
+        padding: 14px;
+        align-items: end;
+      }
+      .settings-row.vendor { grid-template-columns: repeat(4, minmax(130px, 1fr)) auto; }
+      .settings-row.user { grid-template-columns: repeat(4, minmax(130px, 1fr)) auto; }
+      .compact-modal { width: min(760px, calc(100vw - 30px)); }
+      .choice-list, .check-list { display: grid; gap: 10px; }
+      .check-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      .check-item input { width: auto; min-height: 0; }
+      .date-filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+      .error {
+        border: 1px solid #ffc8ce;
+        border-top: 4px solid var(--red);
+        background: #fff6f7;
+        color: #8f1e28;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 18px;
+        font-weight: 800;
+      }
+      .toast {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        background: var(--deep);
+        color: #fff;
+        padding: 13px 16px;
+        border-radius: 8px;
+        box-shadow: 0 18px 45px rgba(0,0,0,.22);
+        font-weight: 850;
+      }
+      @media (max-width: 980px) {
+        .shell { display: block; }
+        aside { position: static; }
+        main { padding: 18px; }
+        header { flex-direction: column; }
+        .metrics, .filters, .vendor-grid, .form-grid, .date-filters, .settings-row, .settings-row.vendor, .settings-row.user { grid-template-columns: 1fr; }
+        .table-head { align-items: flex-start; flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <section id="loading" class="login">
+      <div class="login-card">
+        <div class="logo-card"><img src="https://administracioneventospolar.online/empresas-polar-logo.jpeg" alt="Empresas Polar" onerror="this.remove(); this.nextElementSibling.style.display='block';"><span>EMPRESAS<br>POLAR</span></div>
+        <h1>EVENTOS ESPECIALES</h1>
+        <p id="loadingText">Validando tu correo corporativo...</p>
+      </div>
+    </section>
+
+    <section id="blocked" class="login hidden">
+      <div class="login-card">
+        <div class="logo-card"><img src="https://administracioneventospolar.online/empresas-polar-logo.jpeg" alt="Empresas Polar" onerror="this.remove(); this.nextElementSibling.style.display='block';"><span>EMPRESAS<br>POLAR</span></div>
+        <h1>Acceso no autorizado</h1>
+        <p id="blockedText"></p>
+      </div>
+    </section>
+
+    <div id="app" class="shell hidden">
+      <aside>
+        <div class="brand-lockup">
+          <div class="logo-card"><img src="https://administracioneventospolar.online/empresas-polar-logo.jpeg" alt="Empresas Polar" onerror="this.remove(); this.nextElementSibling.style.display='block';"><span>EMPRESAS<br>POLAR</span></div>
+          <strong>EVENTOS ESPECIALES</strong>
+        </div>
+        <div class="role-card" id="userCard">Cargando...</div>
+        <div class="role-switcher hidden" id="roleTabs">
+          <button class="role-button active" data-view="admin"><span>A</span>Administrador</button>
+          <button class="role-button" data-view="marca"><span>M</span>Marca</button>
+          <button class="role-button" data-view="proveedor"><span>P</span>Proveedor</button>
+        </div>
+        <div class="viewer-panel hidden" id="viewerPanel">
+          <label>Cuenta / vista</label>
+          <select id="viewerSelect"></select>
+        </div>
+        <div class="access-card">
+          <strong>Regla de acceso</strong>
+          <span id="accessText">Cada cuenta ve solo la informacion autorizada por su correo corporativo.</span>
+        </div>
+      </aside>
+
+      <main>
+        <header>
+          <div>
+            <p class="eyebrow">Presupuestos de eventos</p>
+            <h1>Panel general</h1>
+            <p class="muted">Base compartida en Google Sheets con permisos por correo corporativo.</p>
+          </div>
+          <div class="actions">
+            <button class="ghost admin-only hidden" id="settingsBtn">Configuracion</button>
+            <button class="primary can-create hidden" id="newRequestBtn">Nueva solicitud</button>
+            <button class="ghost" id="refreshBtn">Actualizar</button>
+          </div>
+        </header>
+
+        <section id="errorBox" class="error hidden"></section>
+
+        <section class="metrics">
+          <article class="metric"><span>Registros visibles</span><strong id="statCount">0</strong></article>
+          <article class="metric"><span>Presupuesto solicitado</span><strong id="statRequested">$0</strong></article>
+          <article class="metric"><span>Monto con recursos</span><strong id="statAssigned">$0</strong></article>
+          <article class="metric"><span>Por pagar / debe</span><strong id="statPending">$0</strong></article>
+        </section>
+
+        <section class="filters">
+          <input id="searchInput" type="search" placeholder="Buscar descripcion, proveedor, marca o responsable">
+          <select id="statusFilter">
+            <option value="">Todos los estados</option>
+            <option>Solicitado</option>
+            <option>Cotizando</option>
+            <option>Aprobado</option>
+            <option>Recursos asignados</option>
+            <option>Pagado</option>
+          </select>
+        </section>
+
+        <section class="table-card">
+          <div class="table-head">
+            <div class="table-title">
+              <h2>Solicitudes</h2>
+              <span id="requestCount">0 registros</span>
+            </div>
+            <div class="table-actions">
+              <button class="ghost" id="sortBtn">Organizar</button>
+              <button class="ghost" id="exportBtn">Exportar</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Marca</th>
+                  <th>Razon</th>
+                  <th>Descripcion</th>
+                  <th>Responsable</th>
+                  <th>Fecha</th>
+                  <th>Proveedor</th>
+                  <th>Monto</th>
+                  <th>Recursos</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="requestsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="table-card">
+          <div class="table-head">
+            <div class="table-title">
+              <h2>Contactos proveedores</h2>
+              <span id="vendorCount">0 visibles</span>
+            </div>
+          </div>
+          <div id="vendorList" class="vendor-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="requestDialog">
+      <form class="modal" id="requestForm">
+        <div class="modal-head">
+          <h2 id="requestDialogTitle">Nueva solicitud</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <input type="hidden" id="requestId">
+        <div class="form-grid">
+          <label>Marca<select id="requestBrand" required></select></label>
+          <label>Razon<select id="requestReason" required><option>pcv</option><option>efe</option><option>cp</option><option>opc</option></select></label>
+          <label>Descripcion<input id="requestDescription" required></label>
+          <label>Responsable<input id="requestOwner" required></label>
+          <label>Fecha<input id="requestDate" type="date" required></label>
+          <label>Proveedor<select id="requestVendor" required></select></label>
+          <label>Monto<input id="requestAmount" type="number" step="0.01" min="0" required></label>
+          <label>Estado<select id="requestStatus"><option>Solicitado</option><option>Cotizando</option><option>Aprobado</option><option>Recursos asignados</option><option>Pagado</option></select></label>
+          <label class="check"><input id="requestResources" type="checkbox"> Recursos asignados</label>
+          <label class="check"><input id="requestPaid" type="checkbox"> Pagado</label>
+        </div>
+        <label>Detalle<textarea id="requestDetail" rows="3"></textarea></label>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button class="primary" type="submit">Guardar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="settingsDialog" class="wide">
+      <section class="modal">
+        <div class="modal-head">
+          <h2>Configuracion</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <div class="settings-tabs">
+          <button class="ghost tab active" data-tab="brands">Marcas</button>
+          <button class="ghost tab" data-tab="vendors">Proveedores</button>
+          <button class="ghost tab" data-tab="users">Usuarios</button>
+        </div>
+        <div id="settingsContent"></div>
+      </section>
+    </dialog>
+
+    <dialog id="sortDialog">
+      <section class="modal compact-modal">
+        <div class="modal-head">
+          <h2>Organizar solicitudes</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <div class="choice-list">
+          <button type="button" class="ghost" data-sort="amount">Monto: mayor a menor</button>
+          <button type="button" class="ghost" data-sort="recent">Mas reciente</button>
+          <button type="button" class="ghost" data-sort="reason">Razon</button>
+        </div>
+      </section>
+    </dialog>
+
+    <dialog id="exportDialog">
+      <section class="modal compact-modal">
+        <div class="modal-head">
+          <h2>Exportar solicitudes</h2>
+          <button type="button" class="icon" data-close>&times;</button>
+        </div>
+        <p class="muted">Elige marcas y fecha para descargar un CSV compatible con Excel.</p>
+        <div class="date-filters">
+          <label>Dia especifico<input id="exportDay" type="date"></label>
+          <label>Desde<input id="exportFrom" type="date"></label>
+          <label>Hasta<input id="exportTo" type="date"></label>
+        </div>
+        <div class="export-tools">
+          <button type="button" class="ghost" id="selectAllBrands">Seleccionar todo</button>
+          <button type="button" class="ghost" id="clearAllBrands">Limpiar marcas</button>
+          <button type="button" class="ghost" id="clearExportDates">Limpiar fechas</button>
+        </div>
+        <div id="exportBrandList" class="check-list"></div>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button type="button" class="primary" id="downloadCsvBtn">Descargar CSV</button>
+        </div>
+      </section>
+    </dialog>
+
+    <dialog id="confirmDialog">
+      <section class="modal compact-modal">
+        <div class="modal-head"><h2>Confirmar accion</h2></div>
+        <p id="confirmText" class="muted"></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost" id="confirmCancel">Cancelar</button>
+          <button type="button" class="danger" id="confirmAccept">Eliminar</button>
+        </div>
+      </section>
+    </dialog>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script>
+      const state = {
+        data: null,
+        currentView: "admin",
+        viewer: "",
+        search: "",
+        status: "",
+        sort: "",
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const esc = (value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+      const money = (value) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0));
+
+      function callServer(name, ...args) {
+        return new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler((error) => reject(new Error(error.message || String(error))))
+            [name](...args);
+        });
+      }
+
+      function showToast(message) {
+        $("toast").textContent = message;
+        $("toast").classList.remove("hidden");
+        setTimeout(() => $("toast").classList.add("hidden"), 2600);
+      }
+
+      function showError(message) {
+        $("errorBox").textContent = message || "";
+        $("errorBox").classList.toggle("hidden", !message);
+      }
+
+      function brandName(id) {
+        return state.data?.allBrands?.find((item) => item.id === id)?.nombre || id || "";
+      }
+
+      function vendorName(id) {
+        return state.data?.allVendors?.find((item) => item.id === id)?.nombre || id || "";
+      }
+
+      async function load() {
+        showError("");
+        try {
+          const data = await callServer("getBootstrapData");
+          if (!data.authorized) {
+            $("loading").classList.add("hidden");
+            $("app").classList.add("hidden");
+            $("blocked").classList.remove("hidden");
+            $("blockedText").textContent = data.message || "Tu correo no esta autorizado.";
+            return;
+          }
+          state.data = data;
+          $("loading").classList.add("hidden");
+          $("blocked").classList.add("hidden");
+          $("app").classList.remove("hidden");
+          if (data.user.role !== "admin") state.currentView = data.user.role;
+          render();
+        } catch (error) {
+          $("loadingText").textContent = error.message;
+          showError(error.message);
+        }
+      }
+
+      function visibleRequests() {
+        let rows = [...(state.data?.requests || [])];
+        if (state.data.user.role === "admin") {
+          if (state.currentView === "marca" && state.viewer) rows = rows.filter((r) => r.marcaId === state.viewer);
+          if (state.currentView === "proveedor" && state.viewer) rows = rows.filter((r) => r.proveedorId === state.viewer);
+        }
+        if (state.status) rows = rows.filter((r) => r.estado === state.status);
+        if (state.search) {
+          const needle = state.search.toLowerCase();
+          rows = rows.filter((r) => [r.descripcion, r.detalle, r.responsable, r.estado, r.razon, brandName(r.marcaId), vendorName(r.proveedorId)].join(" ").toLowerCase().includes(needle));
+        }
+        if (state.sort === "amount") rows.sort((a, b) => Number(b.monto || 0) - Number(a.monto || 0));
+        if (state.sort === "recent") rows.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+        if (state.sort === "reason") rows.sort((a, b) => String(a.razon || "").localeCompare(String(b.razon || ""), "es", { sensitivity: "base" }));
+        return rows;
+      }
+
+      function render() {
+        const user = state.data.user;
+        $("userCard").innerHTML = `<strong>${esc(user.nombre || user.email)}</strong><span>${esc(user.email)} - ${esc(user.role)}</span>`;
+        document.querySelectorAll(".admin-only").forEach((el) => el.classList.toggle("hidden", user.role !== "admin"));
+        document.querySelectorAll(".can-create").forEach((el) => el.classList.toggle("hidden", !["admin", "marca"].includes(user.role)));
+        $("roleTabs").classList.toggle("hidden", user.role !== "admin");
+        $("viewerPanel").classList.toggle("hidden", user.role !== "admin");
+        document.querySelectorAll(".role-button").forEach((button) => button.classList.toggle("active", button.dataset.view === state.currentView));
+        renderViewer();
+        renderMetrics();
+        renderRequests();
+        renderVendors();
+        renderRequestOptions();
+      }
+
+      function renderViewer() {
+        const select = $("viewerSelect");
+        if (state.currentView === "admin") {
+          select.innerHTML = `<option value="">Todo el sistema</option>`;
+          state.viewer = "";
+          $("accessText").textContent = "El administrador ve todas las marcas, solicitudes, proveedores, montos y recursos.";
+          return;
+        }
+        const source = state.currentView === "marca" ? state.data.allBrands : state.data.allVendors;
+        const label = state.currentView === "marca" ? "Todas las marcas" : "Todos los proveedores";
+        select.innerHTML = `<option value="">${label}</option>` + source.map((item) => `<option value="${esc(item.id)}">${esc(item.nombre)}</option>`).join("");
+        select.value = state.viewer;
+        $("accessText").textContent = state.currentView === "marca" ? "Vista filtrada por marca." : "Vista filtrada por proveedor.";
+      }
+
+      function renderMetrics() {
+        const rows = visibleRequests();
+        const stats = rows.reduce((s, r) => {
+          const amount = Number(r.monto || 0);
+          const assigned = Number(r.montoAsignado || 0);
+          s.count += 1;
+          s.requested += amount;
+          s.assigned += assigned;
+          s.pending += r.pagado ? 0 : (assigned || amount);
+          return s;
+        }, { count: 0, requested: 0, assigned: 0, pending: 0 });
+        $("statCount").textContent = stats.count;
+        $("statRequested").textContent = money(stats.requested);
+        $("statAssigned").textContent = money(stats.assigned);
+        $("statPending").textContent = money(stats.pending);
+      }
+
+      function renderRequests() {
+        const rows = visibleRequests();
+        $("requestCount").textContent = `${rows.length} registros`;
+        $("requestsBody").innerHTML = rows.map((r) => {
+          const canEdit = state.data.user.role === "admin" || state.data.user.role === "marca";
+          const canAdvance = state.data.user.role === "admin" && r.estado !== "Pagado";
+          const canDelete = state.data.user.role === "admin";
+          return `
+            <tr>
+              <td><strong>${esc(brandName(r.marcaId))}</strong></td>
+              <td>${esc(r.razon || "")}</td>
+              <td><strong>${esc(r.descripcion || "")}</strong><div class="sub">${esc(r.detalle || "")}</div></td>
+              <td>${esc(r.responsable || "")}</td>
+              <td>${esc(String(r.fecha || "").slice(0, 10))}</td>
+              <td>${esc(vendorName(r.proveedorId))}</td>
+              <td><strong>${money(r.monto)}</strong><span class="pill ${r.pagado ? "paid" : "bad"}">${r.pagado ? "Pagado" : "Pendiente"}</span></td>
+              <td><span class="pill ${r.recursosAsignados ? "ok" : "bad"}">${r.recursosAsignados ? "Si" : "No"}</span><div class="sub">${r.recursosAsignados ? `${money(r.montoAsignado)} asignado` : "Pendiente por asignar"}</div></td>
+              <td><div class="row-actions">
+                ${canEdit ? `<button class="ghost" data-edit="${esc(r.id)}">Editar</button>` : ""}
+                ${canAdvance ? `<button class="ghost" data-advance="${esc(r.id)}">Avanzar</button>` : ""}
+                ${canDelete ? `<button class="danger" data-delete-request="${esc(r.id)}" data-delete-name="${esc(r.descripcion || r.id)}">Eliminar</button>` : ""}
+              </div></td>
+            </tr>`;
+        }).join("");
+      }
+
+      function renderVendors() {
+        const vendors = state.data.vendors || [];
+        $("vendorCount").textContent = `${vendors.length} visibles`;
+        $("vendorList").innerHTML = vendors.map((v) => `
+          <article class="vendor-item">
+            <strong>${esc(v.nombre)}</strong>
+            <div class="sub">${esc(v.servicio || "")}</div>
+            <div class="sub">${esc(v.contacto || "")}</div>
+            <div>${esc(v.correo || "")}</div>
+          </article>`).join("");
+      }
+
+      function renderRequestOptions() {
+        $("requestBrand").innerHTML = state.data.allBrands.map((b) => `<option value="${esc(b.id)}">${esc(b.nombre)}</option>`).join("");
+        $("requestVendor").innerHTML = state.data.allVendors.map((v) => `<option value="${esc(v.id)}">${esc(v.nombre)}</option>`).join("");
+        if (state.data.user.role === "marca") {
+          $("requestBrand").value = state.data.user.entidadId;
+          $("requestBrand").disabled = true;
+        } else {
+          $("requestBrand").disabled = false;
+        }
+      }
+
+      function openNewRequest() {
+        $("requestDialogTitle").textContent = "Nueva solicitud";
+        $("requestForm").reset();
+        $("requestId").value = "";
+        renderRequestOptions();
+        $("requestDialog").showModal();
+      }
+
+      function openEditRequest(id) {
+        const request = state.data.requests.find((r) => r.id === id);
+        if (!request) return;
+        $("requestDialogTitle").textContent = "Editar solicitud";
+        $("requestId").value = request.id;
+        $("requestBrand").value = request.marcaId;
+        $("requestReason").value = request.razon;
+        $("requestDescription").value = request.descripcion;
+        $("requestOwner").value = request.responsable;
+        $("requestDate").value = String(request.fecha || "").slice(0, 10);
+        $("requestVendor").value = request.proveedorId;
+        $("requestAmount").value = request.monto || 0;
+        $("requestStatus").value = request.estado || "Solicitado";
+        $("requestResources").checked = Boolean(request.recursosAsignados);
+        $("requestPaid").checked = Boolean(request.pagado);
+        $("requestDetail").value = request.detalle || "";
+        $("requestDialog").showModal();
+      }
+
+      async function saveRequest(event) {
+        event.preventDefault();
+        const request = {
+          id: $("requestId").value,
+          marcaId: $("requestBrand").value,
+          razon: $("requestReason").value,
+          descripcion: $("requestDescription").value,
+          responsable: $("requestOwner").value,
+          fecha: $("requestDate").value,
+          proveedorId: $("requestVendor").value,
+          monto: Number($("requestAmount").value || 0),
+          estado: $("requestStatus").value,
+          recursosAsignados: $("requestResources").checked,
+          pagado: $("requestPaid").checked,
+          detalle: $("requestDetail").value,
+        };
+        state.data = request.id ? await callServer("updateRequest", request) : await callServer("createRequest", request);
+        $("requestDialog").close();
+        render();
+        showToast(request.id ? "Solicitud actualizada" : "Solicitud creada");
+      }
+
+      async function advanceRequest(id) {
+        state.data = await callServer("advanceRequest", id);
+        render();
+        showToast("Solicitud avanzada");
+      }
+
+      async function deleteRequest(button) {
+        const id = button.dataset.deleteRequest;
+        const name = button.dataset.deleteName || id;
+        if (!(await askConfirm(`Vas a eliminar el evento: ${name}.`))) return;
+        if (!(await askConfirm("Ultima confirmacion: seguro que quieres eliminar este evento?"))) return;
+        state.data = await callServer("deleteRequest", id);
+        render();
+        showToast("Evento eliminado");
+      }
+
+      function settingsRows(type) {
+        if (type === "brands") {
+          const rows = state.data.allBrands.map((b) => `
+            <form class="settings-row" data-kind="brand">
+              <input name="id" type="hidden" value="${esc(b.id)}">
+              <label>Marca<input name="nombre" value="${esc(b.nombre)}"></label>
+              <label>Razon<input name="razon" value="${esc(b.razon)}"></label>
+              <div class="setting-actions"><button class="ghost">Guardar</button><button class="danger" type="button" data-delete-kind="brand" data-delete-id="${esc(b.id)}" data-delete-name="${esc(b.nombre)}">Eliminar</button></div>
+            </form>`).join("");
+          return `<div class="settings-list">${rows}${newBrandForm()}</div>`;
+        }
+        if (type === "vendors") {
+          const rows = state.data.allVendors.map((v) => `
+            <form class="settings-row vendor" data-kind="vendor">
+              <input name="id" type="hidden" value="${esc(v.id)}">
+              <label>Proveedor<input name="nombre" value="${esc(v.nombre)}"></label>
+              <label>Servicio<input name="servicio" value="${esc(v.servicio)}"></label>
+              <label>Contacto<input name="contacto" value="${esc(v.contacto)}"></label>
+              <label>Correo<input name="correo" value="${esc(v.correo)}"></label>
+              <div class="setting-actions"><button class="ghost">Guardar</button><button class="danger" type="button" data-delete-kind="vendor" data-delete-id="${esc(v.id)}" data-delete-name="${esc(v.nombre)}">Eliminar</button></div>
+            </form>`).join("");
+          return `<div class="settings-list">${rows}${newVendorForm()}</div>`;
+        }
+        const rows = state.data.allUsers.map((u) => `
+          <form class="settings-row user" data-kind="user">
+            <input name="originalEmail" type="hidden" value="${esc(u.email)}">
+            <label>Nombre<input name="nombre" value="${esc(u.nombre)}"></label>
+            <label>Email<input name="email" value="${esc(u.email)}"></label>
+            <label>Rol<select name="rol">${["admin", "marca", "proveedor"].map((role) => `<option ${u.rol === role ? "selected" : ""}>${role}</option>`).join("")}</select></label>
+            <label>Entidad ID<input name="entidadId" value="${esc(u.entidadId)}"></label>
+            <label class="check"><input name="activo" type="checkbox" ${u.activo ? "checked" : ""}> Activo</label>
+            <div class="setting-actions"><button class="ghost">Guardar</button><button class="danger" type="button" data-delete-kind="user" data-delete-id="${esc(u.email)}" data-delete-name="${esc(u.nombre || u.email)}">Eliminar</button></div>
+          </form>`).join("");
+        return `<div class="settings-list">${rows}${newUserForm()}</div>`;
+      }
+
+      function newBrandForm() {
+        return `<form class="settings-row" data-kind="brand-new"><label>Nueva marca<input name="nombre"></label><label>Razon<input name="razon"></label><button class="primary">Agregar</button></form>`;
+      }
+
+      function newVendorForm() {
+        return `<form class="settings-row vendor" data-kind="vendor-new"><label>Nuevo proveedor<input name="nombre"></label><label>Servicio<input name="servicio"></label><label>Contacto<input name="contacto"></label><label>Correo<input name="correo"></label><button class="primary">Agregar</button></form>`;
+      }
+
+      function newUserForm() {
+        return `<form class="settings-row user" data-kind="user-new"><label>Nombre<input name="nombre"></label><label>Email<input name="email"></label><label>Rol<select name="rol"><option>admin</option><option>marca</option><option>proveedor</option></select></label><label>Entidad ID<input name="entidadId"></label><label class="check"><input name="activo" type="checkbox" checked> Activo</label><button class="primary">Agregar</button></form>`;
+      }
+
+      function openSettings() {
+        $("settingsContent").innerHTML = settingsRows("brands");
+        document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === "brands"));
+        $("settingsDialog").showModal();
+      }
+
+      async function saveSetting(form) {
+        const data = Object.fromEntries(new FormData(form).entries());
+        data.activo = form.querySelector('[name="activo"]')?.checked ?? true;
+        const kind = form.dataset.kind;
+        const calls = {
+          brand: ["updateBrand", data],
+          "brand-new": ["createBrand", data],
+          vendor: ["updateVendor", data],
+          "vendor-new": ["createVendor", data],
+          user: ["updateUser", data],
+          "user-new": ["createUser", data],
+        };
+        const [fn, payload] = calls[kind];
+        state.data = await callServer(fn, payload);
+        render();
+        $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
+        showToast("Configuracion guardada");
+      }
+
+      async function deleteSetting(button) {
+        const kind = button.dataset.deleteKind;
+        const id = button.dataset.deleteId;
+        const name = button.dataset.deleteName || id;
+        if (!(await askConfirm(`Vas a eliminar/desactivar: ${name}.`))) return;
+        if (!(await askConfirm("Confirma nuevamente para continuar."))) return;
+        const fn = { brand: "deleteBrand", vendor: "deleteVendor", user: "deleteUser" }[kind];
+        state.data = await callServer(fn, id);
+        render();
+        $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
+        showToast("Registro eliminado");
+      }
+
+      function exportableBrands() {
+        const ids = [...new Set(visibleRequests().map((r) => r.marcaId).filter(Boolean))];
+        return ids.map((id) => ({ id, nombre: brandName(id) })).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+      }
+
+      function openExportDialog() {
+        $("exportDay").value = "";
+        $("exportFrom").value = "";
+        $("exportTo").value = "";
+        const brands = exportableBrands();
+        $("exportBrandList").innerHTML = brands.length ? brands.map((brand) => `
+          <label class="check-item"><input type="checkbox" value="${esc(brand.id)}" checked><span>${esc(brand.nombre)}</span></label>
+        `).join("") : `<p class="muted">No hay solicitudes visibles para exportar.</p>`;
+        $("downloadCsvBtn").disabled = brands.length === 0;
+        $("exportDialog").showModal();
+      }
+
+      function exportDateRange() {
+        const day = $("exportDay").value;
+        if (day) return { from: day, to: day };
+        return { from: $("exportFrom").value, to: $("exportTo").value };
+      }
+
+      function isWithinExportDates(request) {
+        const date = String(request.fecha || "").slice(0, 10);
+        const { from, to } = exportDateRange();
+        if (!date) return !from && !to;
+        if (from && date < from) return false;
+        if (to && date > to) return false;
+        return true;
+      }
+
+      function csvCell(value) {
+        return `"${String(value ?? "").replaceAll('"', '""')}"`;
+      }
+
+      function downloadCsv() {
+        const selected = new Set([...$("exportBrandList").querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value));
+        if (!selected.size) return showToast("Selecciona al menos una marca");
+        const rows = visibleRequests().filter((request) => selected.has(request.marcaId) && isWithinExportDates(request));
+        if (!rows.length) return showToast("No hay solicitudes para exportar con esos filtros");
+        const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "Monto", "Recursos asignados", "Monto asignado", "Pagado", "Estado"];
+        const lines = [
+          headers.map(csvCell).join(";"),
+          ...rows.map((request) => [
+            brandName(request.marcaId), request.razon, request.descripcion, request.detalle, request.responsable,
+            request.fecha, vendorName(request.proveedorId), Number(request.monto || 0), request.recursosAsignados ? "Si" : "No",
+            Number(request.montoAsignado || 0), request.pagado ? "Si" : "No", request.estado,
+          ].map(csvCell).join(";")),
+        ];
+        const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `solicitudes-eventos-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        $("exportDialog").close();
+        showToast("CSV exportado");
+      }
+
+      function applySort(mode) {
+        state.sort = mode;
+        renderMetrics();
+        renderRequests();
+        $("sortDialog").close();
+      }
+
+      function askConfirm(message) {
+        return new Promise((resolve) => {
+          const dialog = $("confirmDialog");
+          const accept = $("confirmAccept");
+          const cancel = $("confirmCancel");
+          $("confirmText").textContent = message;
+          function finish(value) {
+            accept.removeEventListener("click", onAccept);
+            cancel.removeEventListener("click", onCancel);
+            if (dialog.open) dialog.close();
+            resolve(value);
+          }
+          function onAccept() { finish(true); }
+          function onCancel() { finish(false); }
+          accept.addEventListener("click", onAccept);
+          cancel.addEventListener("click", onCancel);
+          dialog.showModal();
+        });
+      }
+
+      document.addEventListener("submit", async (event) => {
+        try {
+          if (event.target.id === "requestForm") await saveRequest(event);
+          if (event.target.matches(".settings-row")) {
+            event.preventDefault();
+            await saveSetting(event.target);
+          }
+        } catch (error) {
+          showError(error.message);
+          showToast("Error");
+        }
+      });
+
+      document.addEventListener("click", async (event) => {
+        try {
+          const close = event.target.closest("[data-close]");
+          if (close) close.closest("dialog").close();
+          const role = event.target.closest(".role-button");
+          if (role) {
+            state.currentView = role.dataset.view;
+            state.viewer = "";
+            render();
+          }
+          const tab = event.target.closest(".tab");
+          if (tab) {
+            document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+            tab.classList.add("active");
+            $("settingsContent").innerHTML = settingsRows(tab.dataset.tab);
+          }
+          const sort = event.target.closest("[data-sort]");
+          if (sort) applySort(sort.dataset.sort);
+          const edit = event.target.closest("[data-edit]");
+          if (edit) openEditRequest(edit.dataset.edit);
+          const advance = event.target.closest("[data-advance]");
+          if (advance) await advanceRequest(advance.dataset.advance);
+          const deleteReq = event.target.closest("[data-delete-request]");
+          if (deleteReq) await deleteRequest(deleteReq);
+          const deleteSettingBtn = event.target.closest("[data-delete-kind]");
+          if (deleteSettingBtn) await deleteSetting(deleteSettingBtn);
+        } catch (error) {
+          showError(error.message);
+          showToast("Error");
+        }
+      });
+
+      $("refreshBtn").addEventListener("click", load);
+      $("newRequestBtn").addEventListener("click", openNewRequest);
+      $("settingsBtn").addEventListener("click", openSettings);
+      $("sortBtn").addEventListener("click", () => $("sortDialog").showModal());
+      $("exportBtn").addEventListener("click", openExportDialog);
+      $("downloadCsvBtn").addEventListener("click", downloadCsv);
+      $("selectAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = true; }));
+      $("clearAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = false; }));
+      $("clearExportDates").addEventListener("click", () => {
+        $("exportDay").value = "";
+        $("exportFrom").value = "";
+        $("exportTo").value = "";
+      });
+      $("exportDay").addEventListener("change", () => {
+        if ($("exportDay").value) {
+          $("exportFrom").value = "";
+          $("exportTo").value = "";
+        }
+      });
+      ["exportFrom", "exportTo"].forEach((id) => $(id).addEventListener("change", () => {
+        if ($(id).value) $("exportDay").value = "";
+      }));
+      $("viewerSelect").addEventListener("change", (event) => {
+        state.viewer = event.target.value;
+        renderMetrics();
+        renderRequests();
+      });
+      $("searchInput").addEventListener("input", (event) => {
+        state.search = event.target.value;
+        renderMetrics();
+        renderRequests();
+      });
+      $("statusFilter").addEventListener("change", (event) => {
+        state.status = event.target.value;
+        renderMetrics();
+        renderRequests();
+      });
+
+      load();
+    </script>
+  </body>
+</html>
