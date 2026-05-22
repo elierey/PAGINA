@@ -90,10 +90,6 @@ function brandName(id) {
   return state.data?.allBrands?.find((x) => x.id === id)?.nombre || id || "";
 }
 
-function brandArea(id) {
-  return state.data?.allBrands?.find((x) => x.id === id)?.area || "";
-}
-
 function vendorName(id) {
   return state.data?.allVendors?.find((x) => x.id === id)?.nombre || id || "";
 }
@@ -287,7 +283,7 @@ function renderRequests() {
     const canDelete = state.data.user.role === "admin";
     return `
       <tr>
-        <td><strong>${brandName(r.marcaId)}</strong><div class="sub">${brandArea(r.marcaId)}</div></td>
+        <td><strong>${brandName(r.marcaId)}</strong></td>
         <td>${r.razon || ""}</td>
         <td><strong>${r.descripcion || ""}</strong><div class="sub">${r.detalle || ""}</div></td>
         <td>${r.responsable || ""}</td>
