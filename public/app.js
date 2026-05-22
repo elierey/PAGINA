@@ -385,7 +385,7 @@ function settingsRows(type) {
       <form class="settings-row" data-kind="brand">
         <input name="id" type="hidden" value="${b.id}">
         <label>Marca<input name="nombre" value="${b.nombre || ""}"></label>
-        <label>Area<input name="area" value="${b.area || ""}"></label>
+        <label>Razon<input name="area" value="${b.area || ""}"></label>
         <span></span>
         <div class="setting-actions">
           <button class="ghost" type="submit">Guardar</button>
@@ -427,7 +427,7 @@ function settingsRows(type) {
 }
 
 function newBrandForm() {
-  return `<form class="settings-row" data-kind="brand-new"><label>Nueva marca<input name="nombre"></label><label>Area<input name="area"></label><span></span><button class="primary">Agregar</button></form>`;
+  return `<form class="settings-row" data-kind="brand-new"><label>Nueva marca<input name="nombre"></label><label>Razon<input name="area"></label><span></span><button class="primary">Agregar</button></form>`;
 }
 
 function newVendorForm() {

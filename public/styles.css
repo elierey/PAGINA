@@ -105,20 +105,29 @@ aside {
   min-height: 66px;
 }
 .logo-card {
-  width: 122px;
+  width: 136px;
+  min-height: 78px;
   background: #fff;
-  color: var(--blue);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px;
   box-shadow: 0 14px 28px rgba(0, 28, 52, .22);
-  font-weight: 900;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.logo-card span {
+.logo-card img {
   display: block;
-  color: var(--red);
-  font-size: .78rem;
-  letter-spacing: .18em;
+  width: 100%;
+  height: auto;
+  max-height: 68px;
+  object-fit: contain;
+}
+.login-card .logo-card {
+  width: 178px;
+  min-height: 92px;
+}
+.login-card .logo-card img {
+  max-height: 82px;
 }
 .brand-lockup strong,
 .brand-lockup span { display: block; }
