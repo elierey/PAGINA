@@ -118,7 +118,7 @@ function createRequest(payload) {
     const request = {
       id: makeRequestId_(),
       marcaId: context.role === "marca" ? context.entidadId : payload.marcaId,
-      razon: payload.razon,
+      razon: normalizeReason_(payload.razon),
       descripcion: payload.descripcion,
       responsable: payload.responsable,
       fecha: normalizeDate_(payload.fecha),
@@ -158,7 +158,7 @@ function updateRequest(payload) {
     const updated = {
       ...current,
       marcaId: context.role === "marca" ? context.entidadId : payload.marcaId,
-      razon: payload.razon,
+      razon: normalizeReason_(payload.razon),
       descripcion: payload.descripcion,
       responsable: payload.responsable,
       fecha: normalizeDate_(payload.fecha),
@@ -252,7 +252,7 @@ function importControlAdm() {
         return;
       }
 
-      const razon = String(sourceValue_(headers, row, ["razon", "razón"]) || "").trim() || "pcv";
+      const razon = normalizeReason_(sourceValue_(headers, row, ["razon", "razón"]) || "pcv");
       const brand = findOrCreateBrand_(brandName || "Sin marca", razon);
       const vendor = findOrCreateVendor_(providerName || "Sin proveedor");
       const ordenCompra = String(sourceValue_(headers, row, ["odc", "oc", "orden de compra", "orden compra", "ordenes de compra"]) || "").trim();
@@ -308,7 +308,7 @@ function createBrand(payload) {
     const brand = {
       id: makeId_(payload.nombre, brands),
       nombre: payload.nombre,
-      razon: payload.razon,
+      razon: normalizeReason_(payload.razon),
       activo: true,
       creadoEn: now_(),
       actualizadoEn: now_(),
@@ -325,7 +325,7 @@ function updateBrand(payload) {
     validateBrand_(payload);
     updateById_(SHEETS.brands, payload.id, {
       nombre: payload.nombre,
-      razon: payload.razon,
+      razon: normalizeReason_(payload.razon),
       activo: payload.activo !== false,
       actualizadoEn: now_(),
     });
@@ -590,6 +590,12 @@ function requireValue_(value, label) {
   if (!String(value || "").trim()) throw new Error(`${label} es obligatorio.`);
 }
 
+function normalizeReason_(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "opc") return "apc";
+  return normalized;
+}
+
 function setupDatabaseIfNeeded_() {
   const ss = getSpreadsheet_();
   Object.keys(SHEETS).forEach((key) => ensureSheet_(ss, SHEETS[key], HEADERS[key]));
@@ -764,13 +770,14 @@ function normalizeKey_(value) {
 
 function findOrCreateBrand_(name, razon) {
   const cleanName = String(name || "Sin marca").trim();
+  const cleanReason = normalizeReason_(razon || "pcv");
   const brands = readObjects_(SHEETS.brands);
   const existing = brands.find((brand) => normalizeKey_(brand.nombre) === normalizeKey_(cleanName));
   if (existing) return existing;
   const brand = {
     id: makeId_(cleanName, brands),
     nombre: cleanName,
-    razon: razon || "pcv",
+    razon: cleanReason,
     activo: true,
     creadoEn: now_(),
     actualizadoEn: now_(),

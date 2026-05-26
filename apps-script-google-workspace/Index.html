@@ -307,6 +307,7 @@
             <button class="ghost admin-only hidden" id="settingsBtn">Configuracion</button>
             <button class="primary can-create hidden" id="newRequestBtn">Nueva solicitud</button>
             <button class="ghost" id="refreshBtn">Actualizar</button>
+            <button class="danger" id="logoutBtn">Cerrar sesion</button>
           </div>
         </header>
 
@@ -385,7 +386,7 @@
         <input type="hidden" id="requestId">
         <div class="form-grid">
           <label>Marca<select id="requestBrand" required></select></label>
-          <label>Razon<select id="requestReason" required><option>pcv</option><option>efe</option><option>cp</option><option>opc</option></select></label>
+          <label>Razon<select id="requestReason" required><option>pcv</option><option>efe</option><option>cp</option><option>apc</option></select></label>
           <label>Descripcion<input id="requestDescription" required></label>
           <label>Responsable<input id="requestOwner" required></label>
           <label>Fecha<input id="requestDate" type="date" required></label>
@@ -513,6 +514,11 @@
         return state.data?.allVendors?.find((item) => item.id === id)?.nombre || id || "";
       }
 
+      function reasonLabel(value) {
+        const reason = String(value || "").trim().toLowerCase();
+        return reason === "opc" ? "apc" : reason;
+      }
+
       async function load() {
         showError("");
         try {
@@ -545,11 +551,11 @@
         if (state.status) rows = rows.filter((r) => r.estado === state.status);
         if (state.search) {
           const needle = state.search.toLowerCase();
-          rows = rows.filter((r) => [r.descripcion, r.detalle, r.responsable, r.estado, r.razon, brandName(r.marcaId), vendorName(r.proveedorId)].join(" ").toLowerCase().includes(needle));
+          rows = rows.filter((r) => [r.descripcion, r.detalle, r.responsable, r.estado, reasonLabel(r.razon), brandName(r.marcaId), vendorName(r.proveedorId)].join(" ").toLowerCase().includes(needle));
         }
         if (state.sort === "amount") rows.sort((a, b) => Number(b.monto || 0) - Number(a.monto || 0));
         if (state.sort === "recent") rows.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
-        if (state.sort === "reason") rows.sort((a, b) => String(a.razon || "").localeCompare(String(b.razon || ""), "es", { sensitivity: "base" }));
+        if (state.sort === "reason") rows.sort((a, b) => reasonLabel(a.razon).localeCompare(reasonLabel(b.razon), "es", { sensitivity: "base" }));
         return rows;
       }
 
@@ -610,7 +616,7 @@
           return `
             <tr>
               <td><strong>${esc(brandName(r.marcaId))}</strong></td>
-              <td>${esc(r.razon || "")}</td>
+              <td>${esc(reasonLabel(r.razon))}</td>
               <td><strong>${esc(r.descripcion || "")}</strong><div class="sub">${esc(r.detalle || "")}</div></td>
               <td>${esc(r.responsable || "")}</td>
               <td>${esc(String(r.fecha || "").slice(0, 10))}</td>
@@ -664,7 +670,7 @@
         $("requestDialogTitle").textContent = "Editar solicitud";
         $("requestId").value = request.id;
         $("requestBrand").value = request.marcaId;
-        $("requestReason").value = request.razon;
+        $("requestReason").value = reasonLabel(request.razon);
         $("requestDescription").value = request.descripcion;
         $("requestOwner").value = request.responsable;
         $("requestDate").value = String(request.fecha || "").slice(0, 10);
@@ -683,7 +689,7 @@
         const request = {
           id: $("requestId").value,
           marcaId: $("requestBrand").value,
-          razon: $("requestReason").value,
+          razon: reasonLabel($("requestReason").value),
           descripcion: $("requestDescription").value,
           responsable: $("requestOwner").value,
           fecha: $("requestDate").value,
@@ -810,6 +816,11 @@
         showToast(state.data.importSummary || "Cuadro administrativo importado");
       }
 
+      async function logout() {
+        if (!(await askConfirm("La sesion la maneja Google. Para cerrar o cambiar de cuenta se cerrara la sesion de Google en este navegador.", "Cerrar sesion"))) return;
+        window.top.location.href = "https://accounts.google.com/Logout";
+      }
+
       function exportableBrands() {
         const ids = [...new Set(visibleRequests().map((r) => r.marcaId).filter(Boolean))];
         return ids.map((id) => ({ id, nombre: brandName(id) })).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
@@ -855,7 +866,7 @@
         const lines = [
           headers.map(csvCell).join(";"),
           ...rows.map((request) => [
-            brandName(request.marcaId), request.razon, request.descripcion, request.detalle, request.responsable,
+            brandName(request.marcaId), reasonLabel(request.razon), request.descripcion, request.detalle, request.responsable,
             request.fecha, vendorName(request.proveedorId), request.ordenCompra, Number(request.monto || 0), request.recursosAsignados ? "Si" : "No",
             Number(request.montoAsignado || 0), request.pagado ? "Si" : "No", request.estado,
           ].map(csvCell).join(";")),
@@ -952,6 +963,7 @@
       $("sortBtn").addEventListener("click", () => $("sortDialog").showModal());
       $("exportBtn").addEventListener("click", openExportDialog);
       $("importBtn").addEventListener("click", importAdminSheet);
+      $("logoutBtn").addEventListener("click", logout);
       $("downloadCsvBtn").addEventListener("click", downloadCsv);
       $("selectAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = true; }));
       $("clearAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = false; }));
