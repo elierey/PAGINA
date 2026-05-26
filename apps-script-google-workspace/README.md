@@ -34,6 +34,7 @@ Esta carpeta contiene una version separada de la app para correr dentro de Googl
    - `SPREADSHEET_ID`: solo si el script no esta creado dentro de la hoja.
    - `SOURCE_SPREADSHEET_ID`: opcional, solo si el cuadro administrativo esta en otra hoja distinta a la base.
    - `AUTO_SYNC_CONTROL_ADM`: opcional. Usa `false` si no quieren que el administrador sincronice automaticamente al abrir.
+   - `AUTO_SYNC_CONTROL_ADM_INTERVAL_MINUTES`: opcional. Por defecto son `5` minutos entre sincronizaciones automaticas.
 7. Ejecutar una vez la funcion `setupDatabase`.
 8. Revisar la pestana `usuarios`: el correo que ejecuto `setupDatabase` queda como primer `admin`.
 9. Agregar los demas usuarios con su rol y `entidadId`.
@@ -84,6 +85,8 @@ La pestana fuente debe llamarse una de estas formas:
 Desde la app, un usuario administrador puede presionar `Importar cuadro ADM`. Ademas, si existe una pestana fuente, la app intenta sincronizarla automaticamente cuando entra un administrador.
 
 Si el cuadro administrativo esta en otro Google Sheet, agrega el ID de esa hoja en la propiedad `SOURCE_SPREADSHEET_ID`.
+
+Para evitar lentitud, la sincronizacion automatica no se repite en cada recarga; por defecto espera 5 minutos entre una sincronizacion automatica y otra. El boton `Importar cuadro ADM` siempre permite forzarla manualmente.
 
 El sistema intenta leer columnas como:
 

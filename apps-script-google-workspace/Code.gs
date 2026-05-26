@@ -306,6 +306,7 @@ function importControlAdm() {
 
     const detail = `${imported} importadas, ${updated} actualizadas, ${skipped} omitidas desde ${source.getName()}`;
     audit_("controlAdm.import", source.getName(), detail, context);
+    PropertiesService.getScriptProperties().setProperty("LAST_CONTROL_ADM_SYNC_MS", String(Date.now()));
     const payload = buildPayload_(context);
     payload.importSummary = detail;
     return payload;
@@ -803,6 +804,9 @@ function toBool_(value) {
 }
 
 function syncControlAdmIfAvailable_(context) {
+  const intervalMinutes = Number(getSetting_("AUTO_SYNC_CONTROL_ADM_INTERVAL_MINUTES", "5")) || 5;
+  const lastSync = Number(getSetting_("LAST_CONTROL_ADM_SYNC_MS", "0")) || 0;
+  if (lastSync && Date.now() - lastSync < intervalMinutes * 60 * 1000) return "";
   const ss = getSourceSpreadsheet_();
   if (!findSourceSheet_(ss)) return "";
   const payload = importControlAdm();
