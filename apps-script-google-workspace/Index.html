@@ -649,7 +649,8 @@
         $("requestBrand").innerHTML = state.data.allBrands.map((b) => `<option value="${esc(b.id)}">${esc(b.nombre)}</option>`).join("");
         $("requestVendor").innerHTML = state.data.allVendors.map((v) => `<option value="${esc(v.id)}">${esc(v.nombre)}</option>`).join("");
         if (state.data.user.role === "marca") {
-          $("requestBrand").value = state.data.user.entidadId;
+          const ownBrand = state.data.brands?.[0] || state.data.allBrands?.[0];
+          $("requestBrand").value = ownBrand?.id || state.data.user.entidadId;
           $("requestBrand").disabled = true;
         } else {
           $("requestBrand").disabled = false;
@@ -752,11 +753,11 @@
             <label>Nombre<input name="nombre" value="${esc(u.nombre)}"></label>
             <label>Email<input name="email" value="${esc(u.email)}"></label>
             <label>Rol<select name="rol">${["admin", "marca", "proveedor"].map((role) => `<option ${u.rol === role ? "selected" : ""}>${role}</option>`).join("")}</select></label>
-            <label>Entidad ID<input name="entidadId" value="${esc(u.entidadId)}"></label>
+            <label>Entidad ID<input name="entidadId" list="entityOptions" value="${esc(u.entidadId)}"></label>
             <label class="check"><input name="activo" type="checkbox" ${u.activo ? "checked" : ""}> Activo</label>
             <div class="setting-actions"><button class="ghost">Guardar</button><button class="danger" type="button" data-delete-kind="user" data-delete-id="${esc(u.email)}" data-delete-name="${esc(u.nombre || u.email)}">Eliminar</button></div>
           </form>`).join("");
-        return `<div class="settings-list">${rows}${newUserForm()}</div>`;
+        return `<div class="settings-list">${entityDatalist()}${rows}${newUserForm()}</div>`;
       }
 
       function newBrandForm() {
@@ -768,7 +769,13 @@
       }
 
       function newUserForm() {
-        return `<form class="settings-row user" data-kind="user-new"><label>Nombre<input name="nombre"></label><label>Email<input name="email"></label><label>Rol<select name="rol"><option>admin</option><option>marca</option><option>proveedor</option></select></label><label>Entidad ID<input name="entidadId"></label><label class="check"><input name="activo" type="checkbox" checked> Activo</label><button class="primary">Agregar</button></form>`;
+        return `<form class="settings-row user" data-kind="user-new"><label>Nombre<input name="nombre"></label><label>Email<input name="email"></label><label>Rol<select name="rol"><option>admin</option><option>marca</option><option>proveedor</option></select></label><label>Entidad ID<input name="entidadId" list="entityOptions"></label><label class="check"><input name="activo" type="checkbox" checked> Activo</label><button class="primary">Agregar</button></form>`;
+      }
+
+      function entityDatalist() {
+        const brands = (state.data.allBrands || []).map((item) => `<option value="${esc(item.id)}">${esc(item.nombre)}</option><option value="${esc(item.nombre)}">${esc(item.id)}</option>`).join("");
+        const vendors = (state.data.allVendors || []).map((item) => `<option value="${esc(item.id)}">${esc(item.nombre)}</option><option value="${esc(item.nombre)}">${esc(item.id)}</option>`).join("");
+        return `<datalist id="entityOptions">${brands}${vendors}</datalist>`;
       }
 
       function openSettings() {

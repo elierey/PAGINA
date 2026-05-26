@@ -106,7 +106,17 @@ function getBootstrapData() {
   setupDatabaseIfNeeded_();
   const context = getUserContext_();
   if (!context.authorized) return context;
-  return buildPayload_(context);
+  let syncSummary = "";
+  if (context.role === "admin" && getSetting_("AUTO_SYNC_CONTROL_ADM", "true") !== "false") {
+    try {
+      syncSummary = syncControlAdmIfAvailable_(context) || "";
+    } catch (error) {
+      syncSummary = `No se pudo sincronizar el cuadro administrativo: ${error.message}`;
+    }
+  }
+  const payload = buildPayload_(context);
+  if (syncSummary) payload.syncSummary = syncSummary;
+  return payload;
 }
 
 function createRequest(payload) {
@@ -115,9 +125,10 @@ function createRequest(payload) {
     validateRequest_(payload, context);
     const amount = Number(payload.monto || 0);
     const resourcesAssigned = toBool_(payload.recursosAsignados);
+    const brandId = context.role === "marca" ? resolveBrandId_(context.entidadId) : payload.marcaId;
     const request = {
       id: makeRequestId_(),
-      marcaId: context.role === "marca" ? context.entidadId : payload.marcaId,
+      marcaId: brandId,
       razon: normalizeReason_(payload.razon),
       descripcion: payload.descripcion,
       responsable: payload.responsable,
@@ -149,15 +160,16 @@ function updateRequest(payload) {
     const index = table.objects.findIndex((item) => item.id === payload.id && !toBool_(item.eliminado));
     if (index < 0) throw new Error("Solicitud no encontrada.");
     const current = table.objects[index];
-    if (context.role === "marca" && current.marcaId !== context.entidadId) {
+    if (context.role === "marca" && !resolveBrandIds_(context.entidadId).includes(current.marcaId)) {
       throw new Error("No puedes editar solicitudes de otra marca.");
     }
     validateRequest_({ ...current, ...payload }, context);
     const amount = Number(payload.monto || current.monto || 0);
     const resourcesAssigned = toBool_(payload.recursosAsignados);
+    const brandId = context.role === "marca" ? resolveBrandId_(context.entidadId) : payload.marcaId;
     const updated = {
       ...current,
-      marcaId: context.role === "marca" ? context.entidadId : payload.marcaId,
+      marcaId: brandId,
       razon: normalizeReason_(payload.razon),
       descripcion: payload.descripcion,
       responsable: payload.responsable,
@@ -228,7 +240,7 @@ function importControlAdm() {
   return withWriteLock_(() => {
     const context = requireRole_(["admin"]);
     setupDatabaseIfNeeded_();
-    const ss = getSpreadsheet_();
+    const ss = getSourceSpreadsheet_();
     const source = findSourceSheet_(ss);
     if (!source) {
       throw new Error(`No encontre una pestana fuente. Crea o renombra el cuadro como: ${SOURCE_SHEET_CANDIDATES.join(", ")}.`);
@@ -404,7 +416,7 @@ function createUser(payload) {
       email,
       nombre: payload.nombre || payload.email,
       rol: String(payload.rol || "marca").toLowerCase(),
-      entidadId: payload.entidadId || "",
+      entidadId: payload.entidadId || inferEntityIdFromEmail_(email, payload.rol),
       activo: payload.activo !== false,
       notas: payload.notas || "",
       creadoEn: now_(),
@@ -430,7 +442,7 @@ function updateUser(payload) {
       email: nextEmail,
       nombre: payload.nombre || payload.email,
       rol: String(payload.rol || "marca").toLowerCase(),
-      entidadId: payload.entidadId || "",
+      entidadId: payload.entidadId || inferEntityIdFromEmail_(nextEmail, payload.rol),
       activo: payload.activo !== false,
       notas: payload.notas || "",
       actualizadoEn: now_(),
@@ -457,12 +469,14 @@ function buildPayload_(context) {
   const allRequests = readObjects_(SHEETS.requests).filter((item) => !toBool_(item.eliminado));
   const requests = filterRequests_(allRequests, context);
   const vendorIds = new Set(requests.map((item) => item.proveedorId));
+  const allowedBrandIds = new Set(context.role === "marca" ? resolveBrandIds_(context.entidadId) : []);
+  const allowedVendorIds = new Set(context.role === "proveedor" ? resolveVendorIds_(context.entidadId) : []);
   const visibleBrands = context.role === "admin"
     ? brands
-    : brands.filter((item) => item.id === context.entidadId || requests.some((request) => request.marcaId === item.id));
+    : brands.filter((item) => allowedBrandIds.has(item.id) || requests.some((request) => request.marcaId === item.id));
   const visibleVendors = context.role === "admin" || context.role === "marca"
     ? vendors
-    : vendors.filter((item) => item.id === context.entidadId || vendorIds.has(item.id));
+    : vendors.filter((item) => allowedVendorIds.has(item.id) || vendorIds.has(item.id));
 
   return {
     authorized: true,
@@ -511,7 +525,7 @@ function getUserContext_() {
     authorized: true,
     email,
     role: String(user.rol || "").toLowerCase(),
-    entidadId: user.entidadId || "",
+    entidadId: user.entidadId || inferEntityIdFromEmail_(email, user.rol),
     nombre: user.nombre || email,
   };
 }
@@ -523,10 +537,50 @@ function requireRole_(roles) {
   return context;
 }
 
+function inferEntityIdFromEmail_(email, role) {
+  if (!["marca", "proveedor"].includes(String(role || "").toLowerCase())) return "";
+  const local = cleanEmail_(email).split("@")[0] || "";
+  const parts = local.split(/[._-]+/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : local;
+}
+
+function resolveBrandId_(entidadId) {
+  const ids = resolveBrandIds_(entidadId);
+  return ids[0] || String(entidadId || "").trim();
+}
+
+function resolveBrandIds_(entidadId) {
+  return resolveEntityIds_(SHEETS.brands, entidadId, ["id", "nombre"]);
+}
+
+function resolveVendorIds_(entidadId) {
+  return resolveEntityIds_(SHEETS.vendors, entidadId, ["id", "nombre", "correo"]);
+}
+
+function resolveEntityIds_(sheetName, entidadId, fields) {
+  const target = normalizeKey_(entidadId);
+  if (!target) return [];
+  return readObjects_(sheetName)
+    .filter((item) => toBool_(item.activo))
+    .filter((item) => {
+      const aliases = fields
+        .map((field) => normalizeKey_(item[field]))
+        .filter(Boolean);
+      return aliases.includes(target) || aliases.some((alias) => target.length >= 4 && (alias.startsWith(target) || target.startsWith(alias)));
+    })
+    .map((item) => item.id);
+}
+
 function filterRequests_(requests, context) {
   if (context.role === "admin") return requests;
-  if (context.role === "marca") return requests.filter((item) => item.marcaId === context.entidadId);
-  if (context.role === "proveedor") return requests.filter((item) => item.proveedorId === context.entidadId);
+  if (context.role === "marca") {
+    const brandIds = new Set(resolveBrandIds_(context.entidadId));
+    return requests.filter((item) => brandIds.has(item.marcaId));
+  }
+  if (context.role === "proveedor") {
+    const vendorIds = new Set(resolveVendorIds_(context.entidadId));
+    return requests.filter((item) => vendorIds.has(item.proveedorId));
+  }
   return [];
 }
 
@@ -545,7 +599,7 @@ function summarize_(requests) {
 function validateRequest_(payload, context) {
   const brands = readObjects_(SHEETS.brands).filter((item) => toBool_(item.activo));
   const vendors = readObjects_(SHEETS.vendors).filter((item) => toBool_(item.activo));
-  const brandId = context.role === "marca" ? context.entidadId : payload.marcaId;
+  const brandId = context.role === "marca" ? resolveBrandId_(context.entidadId) : payload.marcaId;
   if (context.role === "admin") requireValue_(payload.marcaId, "Marca");
   if (context.role === "marca") requireValue_(context.entidadId, "Marca autorizada");
   if (!brands.some((brand) => brand.id === brandId)) throw new Error("Marca no valida o inactiva.");
@@ -574,14 +628,15 @@ function validateUser_(payload) {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Email invalido.");
   if (!emailAllowed_(email)) throw new Error("El usuario debe pertenecer al dominio permitido.");
   const role = String(payload.rol || "").toLowerCase();
+  const entityId = String(payload.entidadId || inferEntityIdFromEmail_(email, role) || "").trim();
   if (!["admin", "marca", "proveedor"].includes(role)) throw new Error("Rol invalido.");
-  if (["marca", "proveedor"].includes(role) && !String(payload.entidadId || "").trim()) {
+  if (["marca", "proveedor"].includes(role) && !entityId) {
     throw new Error("Los usuarios de marca/proveedor deben tener Entidad ID.");
   }
-  if (role === "marca" && !readObjects_(SHEETS.brands).some((brand) => brand.id === payload.entidadId && toBool_(brand.activo))) {
+  if (role === "marca" && !resolveBrandIds_(entityId).length) {
     throw new Error("La Entidad ID de marca no existe o esta inactiva.");
   }
-  if (role === "proveedor" && !readObjects_(SHEETS.vendors).some((vendor) => vendor.id === payload.entidadId && toBool_(vendor.activo))) {
+  if (role === "proveedor" && !resolveVendorIds_(entityId).length) {
     throw new Error("La Entidad ID de proveedor no existe o esta inactiva.");
   }
 }
@@ -745,6 +800,18 @@ function toBool_(value) {
   if (value === true) return true;
   const normalized = String(value || "").trim().toLowerCase();
   return ["true", "si", "yes", "1", "x"].includes(normalized);
+}
+
+function syncControlAdmIfAvailable_(context) {
+  const ss = getSourceSpreadsheet_();
+  if (!findSourceSheet_(ss)) return "";
+  const payload = importControlAdm();
+  return payload.importSummary || "";
+}
+
+function getSourceSpreadsheet_() {
+  const id = getSetting_("SOURCE_SPREADSHEET_ID", "");
+  return id ? SpreadsheetApp.openById(id) : getSpreadsheet_();
 }
 
 function findSourceSheet_(ss) {
