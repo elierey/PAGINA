@@ -563,7 +563,7 @@
         const user = state.data.user;
         $("userCard").innerHTML = `<strong>${esc(user.nombre || user.email)}</strong><span>${esc(user.email)} - ${esc(user.role)}</span>`;
         document.querySelectorAll(".admin-only").forEach((el) => el.classList.toggle("hidden", user.role !== "admin"));
-        document.querySelectorAll(".can-create").forEach((el) => el.classList.toggle("hidden", !["admin", "marca"].includes(user.role)));
+        document.querySelectorAll(".can-create").forEach((el) => el.classList.toggle("hidden", user.role !== "admin"));
         $("roleTabs").classList.toggle("hidden", user.role !== "admin");
         $("viewerPanel").classList.toggle("hidden", user.role !== "admin");
         document.querySelectorAll(".role-button").forEach((button) => button.classList.toggle("active", button.dataset.view === state.currentView));
@@ -610,7 +610,7 @@
         const rows = visibleRequests();
         $("requestCount").textContent = `${rows.length} registros`;
         $("requestsBody").innerHTML = rows.map((r) => {
-          const canEdit = state.data.user.role === "admin" || state.data.user.role === "marca";
+          const canEdit = state.data.user.role === "admin";
           const canAdvance = state.data.user.role === "admin" && r.estado !== "Pagado";
           const canDelete = state.data.user.role === "admin";
           return `

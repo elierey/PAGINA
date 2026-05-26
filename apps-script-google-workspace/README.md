@@ -9,7 +9,7 @@ Esta carpeta contiene una version separada de la app para correr dentro de Googl
 - La hoja puede quedar privada para administradores, porque la web app se ejecuta como el usuario que la despliega.
 - Cada usuario queda filtrado por su correo y rol:
   - `admin`: ve todo y configura marcas, proveedores y usuarios.
-  - `marca`: ve y crea solicitudes solo de su marca.
+  - `marca`: ve solicitudes solo de su marca, sin crear ni editar.
   - `proveedor`: ve solo solicitudes asociadas a su proveedor.
 - Exportacion CSV por marca y fecha.
 - Edicion, avance y eliminacion logica de solicitudes.
@@ -63,6 +63,7 @@ Para usuarios de marca, `entidadId` puede ser el `id` o el nombre de la marca. P
 
 - Restriccion por dominio corporativo.
 - Autorizacion por rol en el servidor, no solo en pantalla.
+- Las cuentas de marca son de solo lectura.
 - Validacion de marcas/proveedores activos antes de crear solicitudes.
 - Eliminacion logica, no borrado destructivo.
 - Auditoria de creaciones, cambios, avances y eliminaciones.

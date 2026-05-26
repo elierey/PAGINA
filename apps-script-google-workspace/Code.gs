@@ -121,7 +121,7 @@ function getBootstrapData() {
 
 function createRequest(payload) {
   return withWriteLock_(() => {
-    const context = requireRole_(["admin", "marca"]);
+    const context = requireRole_(["admin"]);
     validateRequest_(payload, context);
     const amount = Number(payload.monto || 0);
     const resourcesAssigned = toBool_(payload.recursosAsignados);
@@ -155,7 +155,7 @@ function createRequest(payload) {
 
 function updateRequest(payload) {
   return withWriteLock_(() => {
-    const context = requireRole_(["admin", "marca"]);
+    const context = requireRole_(["admin"]);
     const table = readTable_(SHEETS.requests);
     const index = table.objects.findIndex((item) => item.id === payload.id && !toBool_(item.eliminado));
     if (index < 0) throw new Error("Solicitud no encontrada.");
