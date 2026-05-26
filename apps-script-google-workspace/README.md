@@ -66,6 +66,41 @@ Para usuarios de marca, `entidadId` debe ser el `id` de la marca. Para usuarios 
 - Auditoria de creaciones, cambios, avances y eliminaciones.
 - Bloqueo de escritura para evitar choques si dos personas guardan al mismo tiempo.
 
+## Importar cuadro administrativo
+
+La app puede alimentar la pestana `solicitudes` desde un cuadro administrativo existente.
+
+La pestana fuente debe llamarse una de estas formas:
+
+- `Control Adm`
+- `Control ADM`
+- `Cuadro Administrativo`
+- `Cuadro Administrativo - Eventos`
+- `Control Administrativo`
+
+Desde la app, un usuario administrador puede presionar `Importar cuadro ADM`. El sistema intenta leer columnas como:
+
+- `marca`
+- `razon`
+- `descripcion`
+- `responsable`
+- `fecha`
+- `mes`
+- `año`
+- `proveedor`
+- `ODC`
+- `monto`
+
+Si una marca o proveedor no existe, lo crea automaticamente.
+
+## Notas de instalacion
+
+Si el proyecto se crea directamente desde `script.google.com`, la app crea una hoja base automaticamente y guarda su `SPREADSHEET_ID`.
+
+Si el proyecto se crea desde `Extensiones > Apps Script` dentro de una hoja, usa esa hoja como base.
+
+El archivo HTML puede llamarse `Index.html` o `index.html`.
+
 ## Nota para pruebas
 
 La URL `/dev` de Apps Script solo funciona para usuarios con acceso de edicion al script. Para Estefania y usuarios finales siempre se debe usar la URL `/exec` de la implementacion publicada.

@@ -340,6 +340,7 @@
             <div class="table-actions">
               <button class="ghost" id="sortBtn">Organizar</button>
               <button class="ghost" id="exportBtn">Exportar</button>
+              <button class="ghost admin-only hidden" id="importBtn">Importar cuadro ADM</button>
             </div>
           </div>
           <div class="table-wrap">
@@ -352,6 +353,7 @@
                   <th>Responsable</th>
                   <th>Fecha</th>
                   <th>Proveedor</th>
+                  <th>ODC</th>
                   <th>Monto</th>
                   <th>Recursos</th>
                   <th>Acciones</th>
@@ -388,6 +390,7 @@
           <label>Responsable<input id="requestOwner" required></label>
           <label>Fecha<input id="requestDate" type="date" required></label>
           <label>Proveedor<select id="requestVendor" required></select></label>
+          <label>ODC / Orden de compra<input id="requestOrder"></label>
           <label>Monto<input id="requestAmount" type="number" step="0.01" min="0" required></label>
           <label>Estado<select id="requestStatus"><option>Solicitado</option><option>Cotizando</option><option>Aprobado</option><option>Recursos asignados</option><option>Pagado</option></select></label>
           <label class="check"><input id="requestResources" type="checkbox"> Recursos asignados</label>
@@ -612,6 +615,7 @@
               <td>${esc(r.responsable || "")}</td>
               <td>${esc(String(r.fecha || "").slice(0, 10))}</td>
               <td>${esc(vendorName(r.proveedorId))}</td>
+              <td>${esc(r.ordenCompra || "")}</td>
               <td><strong>${money(r.monto)}</strong><span class="pill ${r.pagado ? "paid" : "bad"}">${r.pagado ? "Pagado" : "Pendiente"}</span></td>
               <td><span class="pill ${r.recursosAsignados ? "ok" : "bad"}">${r.recursosAsignados ? "Si" : "No"}</span><div class="sub">${r.recursosAsignados ? `${money(r.montoAsignado)} asignado` : "Pendiente por asignar"}</div></td>
               <td><div class="row-actions">
@@ -665,6 +669,7 @@
         $("requestOwner").value = request.responsable;
         $("requestDate").value = String(request.fecha || "").slice(0, 10);
         $("requestVendor").value = request.proveedorId;
+        $("requestOrder").value = request.ordenCompra || "";
         $("requestAmount").value = request.monto || 0;
         $("requestStatus").value = request.estado || "Solicitado";
         $("requestResources").checked = Boolean(request.recursosAsignados);
@@ -683,6 +688,7 @@
           responsable: $("requestOwner").value,
           fecha: $("requestDate").value,
           proveedorId: $("requestVendor").value,
+          ordenCompra: $("requestOrder").value,
           monto: Number($("requestAmount").value || 0),
           estado: $("requestStatus").value,
           recursosAsignados: $("requestResources").checked,
@@ -704,8 +710,8 @@
       async function deleteRequest(button) {
         const id = button.dataset.deleteRequest;
         const name = button.dataset.deleteName || id;
-        if (!(await askConfirm(`Vas a eliminar el evento: ${name}.`))) return;
-        if (!(await askConfirm("Ultima confirmacion: seguro que quieres eliminar este evento?"))) return;
+        if (!(await askConfirm(`Vas a eliminar el evento: ${name}.`, "Eliminar"))) return;
+        if (!(await askConfirm("Ultima confirmacion: seguro que quieres eliminar este evento?", "Eliminar"))) return;
         state.data = await callServer("deleteRequest", id);
         render();
         showToast("Evento eliminado");
@@ -788,13 +794,20 @@
         const kind = button.dataset.deleteKind;
         const id = button.dataset.deleteId;
         const name = button.dataset.deleteName || id;
-        if (!(await askConfirm(`Vas a eliminar/desactivar: ${name}.`))) return;
-        if (!(await askConfirm("Confirma nuevamente para continuar."))) return;
+        if (!(await askConfirm(`Vas a eliminar/desactivar: ${name}.`, "Eliminar"))) return;
+        if (!(await askConfirm("Confirma nuevamente para continuar.", "Eliminar"))) return;
         const fn = { brand: "deleteBrand", vendor: "deleteVendor", user: "deleteUser" }[kind];
         state.data = await callServer(fn, id);
         render();
         $("settingsContent").innerHTML = settingsRows(document.querySelector(".tab.active").dataset.tab);
         showToast("Registro eliminado");
+      }
+
+      async function importAdminSheet() {
+        if (!(await askConfirm("Se importaran/actualizaran solicitudes desde la pestana Control Adm del Google Sheet.", "Importar"))) return;
+        state.data = await callServer("importControlAdm");
+        render();
+        showToast(state.data.importSummary || "Cuadro administrativo importado");
       }
 
       function exportableBrands() {
@@ -838,12 +851,12 @@
         if (!selected.size) return showToast("Selecciona al menos una marca");
         const rows = visibleRequests().filter((request) => selected.has(request.marcaId) && isWithinExportDates(request));
         if (!rows.length) return showToast("No hay solicitudes para exportar con esos filtros");
-        const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "Monto", "Recursos asignados", "Monto asignado", "Pagado", "Estado"];
+        const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "ODC", "Monto", "Recursos asignados", "Monto asignado", "Pagado", "Estado"];
         const lines = [
           headers.map(csvCell).join(";"),
           ...rows.map((request) => [
             brandName(request.marcaId), request.razon, request.descripcion, request.detalle, request.responsable,
-            request.fecha, vendorName(request.proveedorId), Number(request.monto || 0), request.recursosAsignados ? "Si" : "No",
+            request.fecha, vendorName(request.proveedorId), request.ordenCompra, Number(request.monto || 0), request.recursosAsignados ? "Si" : "No",
             Number(request.montoAsignado || 0), request.pagado ? "Si" : "No", request.estado,
           ].map(csvCell).join(";")),
         ];
@@ -867,12 +880,13 @@
         $("sortDialog").close();
       }
 
-      function askConfirm(message) {
+      function askConfirm(message, acceptLabel = "Aceptar") {
         return new Promise((resolve) => {
           const dialog = $("confirmDialog");
           const accept = $("confirmAccept");
           const cancel = $("confirmCancel");
           $("confirmText").textContent = message;
+          accept.textContent = acceptLabel;
           function finish(value) {
             accept.removeEventListener("click", onAccept);
             cancel.removeEventListener("click", onCancel);
@@ -937,6 +951,7 @@
       $("settingsBtn").addEventListener("click", openSettings);
       $("sortBtn").addEventListener("click", () => $("sortDialog").showModal());
       $("exportBtn").addEventListener("click", openExportDialog);
+      $("importBtn").addEventListener("click", importAdminSheet);
       $("downloadCsvBtn").addEventListener("click", downloadCsv);
       $("selectAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = true; }));
       $("clearAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = false; }));

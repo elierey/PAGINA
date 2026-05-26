@@ -13,6 +13,14 @@ const SHEETS = {
   audit: "auditoria",
 };
 
+const SOURCE_SHEET_CANDIDATES = [
+  "Control Adm",
+  "Control ADM",
+  "Cuadro Administrativo",
+  "Cuadro Administrativo - Eventos",
+  "Control Administrativo",
+];
+
 const HEADERS = {
   users: ["id", "email", "nombre", "rol", "entidadId", "activo", "notas", "creadoEn", "actualizadoEn"],
   brands: ["id", "nombre", "razon", "activo", "creadoEn", "actualizadoEn"],
@@ -25,6 +33,7 @@ const HEADERS = {
     "responsable",
     "fecha",
     "proveedorId",
+    "ordenCompra",
     "monto",
     "recursosAsignados",
     "montoAsignado",
@@ -41,11 +50,20 @@ const HEADERS = {
 };
 
 function doGet() {
+  const template = getIndexTemplate_();
   return HtmlService
-    .createTemplateFromFile("Index")
+    .createTemplate(template)
     .evaluate()
     .setTitle(APP.title)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+
+function getIndexTemplate_() {
+  try {
+    return HtmlService.createHtmlOutputFromFile("Index").getContent();
+  } catch (error) {
+    return HtmlService.createHtmlOutputFromFile("index").getContent();
+  }
 }
 
 function setupDatabase() {
@@ -105,6 +123,7 @@ function createRequest(payload) {
       responsable: payload.responsable,
       fecha: normalizeDate_(payload.fecha),
       proveedorId: payload.proveedorId,
+      ordenCompra: payload.ordenCompra || "",
       monto: amount,
       recursosAsignados: resourcesAssigned,
       montoAsignado: resourcesAssigned ? amount : Number(payload.montoAsignado || 0),
@@ -144,6 +163,7 @@ function updateRequest(payload) {
       responsable: payload.responsable,
       fecha: normalizeDate_(payload.fecha),
       proveedorId: payload.proveedorId,
+      ordenCompra: payload.ordenCompra || "",
       monto: amount,
       recursosAsignados: resourcesAssigned,
       montoAsignado: resourcesAssigned ? (Number(payload.montoAsignado || 0) || amount) : Number(payload.montoAsignado || 0),
@@ -201,6 +221,82 @@ function deleteRequest(id) {
     writeObjectRow_(SHEETS.requests, table.headers, index + 2, request);
     audit_("request.delete", request.id, request.descripcion, context);
     return buildPayload_(context);
+  });
+}
+
+function importControlAdm() {
+  return withWriteLock_(() => {
+    const context = requireRole_(["admin"]);
+    setupDatabaseIfNeeded_();
+    const ss = getSpreadsheet_();
+    const source = findSourceSheet_(ss);
+    if (!source) {
+      throw new Error(`No encontre una pestana fuente. Crea o renombra el cuadro como: ${SOURCE_SHEET_CANDIDATES.join(", ")}.`);
+    }
+
+    const range = source.getDataRange();
+    const values = range.getNumRows() ? range.getValues() : [];
+    if (values.length < 2) throw new Error("El cuadro administrativo no tiene filas para importar.");
+
+    const headers = values[0].map((header) => String(header || "").trim());
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    values.slice(1).forEach((row, offset) => {
+      const descripcion = String(sourceValue_(headers, row, ["descripcion", "descripción", "detalle", "concepto"]) || "").trim();
+      const brandName = String(sourceValue_(headers, row, ["marca", "brand"]) || "").trim();
+      const providerName = String(sourceValue_(headers, row, ["proveedor", "vendor"]) || "").trim();
+      if (!descripcion && !brandName && !providerName) {
+        skipped += 1;
+        return;
+      }
+
+      const razon = String(sourceValue_(headers, row, ["razon", "razón"]) || "").trim() || "pcv";
+      const brand = findOrCreateBrand_(brandName || "Sin marca", razon);
+      const vendor = findOrCreateVendor_(providerName || "Sin proveedor");
+      const ordenCompra = String(sourceValue_(headers, row, ["odc", "oc", "orden de compra", "orden compra", "ordenes de compra"]) || "").trim();
+      const request = {
+        id: stableImportId_(source.getName(), offset + 2, brand.id, descripcion, ordenCompra),
+        marcaId: brand.id,
+        razon,
+        descripcion: descripcion || `Solicitud ${offset + 2}`,
+        responsable: String(sourceValue_(headers, row, ["responsable", "responsable evento"]) || "").trim(),
+        fecha: sourceDate_(headers, row),
+        proveedorId: vendor.id,
+        ordenCompra,
+        monto: parseAmount_(sourceValue_(headers, row, ["monto $", "monto", "importe", "presupuesto solicitado"])),
+        recursosAsignados: toBool_(sourceValue_(headers, row, ["recursos asignados", "recursos", "asignado"])),
+        montoAsignado: parseAmount_(sourceValue_(headers, row, ["monto asignado", "monto con recursos"])),
+        pagado: toBool_(sourceValue_(headers, row, ["pagado", "factura", "facturado"])),
+        estado: "",
+        detalle: descripcion,
+        creadoPor: context.email,
+        creadoEn: now_(),
+        actualizadoPor: context.email,
+        actualizadoEn: now_(),
+        eliminado: false,
+      };
+      request.estado = request.pagado ? "Pagado" : (request.recursosAsignados ? "Recursos asignados" : "Solicitado");
+      if (request.recursosAsignados && !request.montoAsignado) request.montoAsignado = request.monto;
+
+      const table = readTable_(SHEETS.requests);
+      const index = table.objects.findIndex((item) => item.id === request.id);
+      if (index >= 0) {
+        const current = table.objects[index];
+        writeObjectRow_(SHEETS.requests, table.headers, index + 2, { ...current, ...request, creadoPor: current.creadoPor || context.email, creadoEn: current.creadoEn || now_() });
+        updated += 1;
+      } else {
+        appendObject_(SHEETS.requests, HEADERS.requests, request);
+        imported += 1;
+      }
+    });
+
+    const detail = `${imported} importadas, ${updated} actualizadas, ${skipped} omitidas desde ${source.getName()}`;
+    audit_("controlAdm.import", source.getName(), detail, context);
+    const payload = buildPayload_(context);
+    payload.importSummary = detail;
+    return payload;
   });
 }
 
@@ -503,18 +599,26 @@ function getSpreadsheet_() {
   const id = getSetting_("SPREADSHEET_ID", "");
   if (id) return SpreadsheetApp.openById(id);
   const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (!active) throw new Error("No hay Google Sheet activo. Crea el script desde Extensiones > Apps Script dentro de la hoja.");
-  return active;
+  if (active) return active;
+  const created = SpreadsheetApp.create("Base Eventos Especiales Polar");
+  PropertiesService.getScriptProperties().setProperty("SPREADSHEET_ID", created.getId());
+  return created;
 }
 
 function ensureSheet_(ss, sheetName, headers) {
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) sheet = ss.insertSheet(sheetName);
-  const firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  const firstRow = sheet.getRange(1, 1, 1, Math.max(headers.length, sheet.getLastColumn() || 1)).getValues()[0];
   const hasHeaders = firstRow.some((cell) => String(cell || "").trim());
   if (!hasHeaders) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
+  } else {
+    const current = firstRow.map((cell) => String(cell || "").trim()).filter(Boolean);
+    const missing = headers.filter((header) => !current.includes(header));
+    if (missing.length) {
+      sheet.getRange(1, current.length + 1, 1, missing.length).setValues([missing]);
+    }
   }
   return sheet;
 }
@@ -586,7 +690,7 @@ function audit_(action, entity, detail, context) {
 }
 
 function withWriteLock_(fn) {
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getDocumentLock() || LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     return fn();
@@ -637,13 +741,116 @@ function toBool_(value) {
   return ["true", "si", "yes", "1", "x"].includes(normalized);
 }
 
-function makeId_(name, existing) {
-  const base = String(name || "registro")
+function findSourceSheet_(ss) {
+  return SOURCE_SHEET_CANDIDATES
+    .map((name) => ss.getSheetByName(name))
+    .find(Boolean);
+}
+
+function sourceValue_(headers, row, names) {
+  const wanted = names.map(normalizeKey_);
+  const index = headers.findIndex((header) => wanted.includes(normalizeKey_(header)));
+  return index >= 0 ? normalizeValue_(row[index]) : "";
+}
+
+function normalizeKey_(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function findOrCreateBrand_(name, razon) {
+  const cleanName = String(name || "Sin marca").trim();
+  const brands = readObjects_(SHEETS.brands);
+  const existing = brands.find((brand) => normalizeKey_(brand.nombre) === normalizeKey_(cleanName));
+  if (existing) return existing;
+  const brand = {
+    id: makeId_(cleanName, brands),
+    nombre: cleanName,
+    razon: razon || "pcv",
+    activo: true,
+    creadoEn: now_(),
+    actualizadoEn: now_(),
+  };
+  appendObject_(SHEETS.brands, HEADERS.brands, brand);
+  return brand;
+}
+
+function findOrCreateVendor_(name) {
+  const cleanName = String(name || "Sin proveedor").trim();
+  const vendors = readObjects_(SHEETS.vendors);
+  const existing = vendors.find((vendor) => normalizeKey_(vendor.nombre) === normalizeKey_(cleanName));
+  if (existing) return existing;
+  const vendor = {
+    id: makeId_(cleanName, vendors),
+    nombre: cleanName,
+    servicio: "Por definir",
+    contacto: "",
+    correo: "",
+    activo: true,
+    creadoEn: now_(),
+    actualizadoEn: now_(),
+  };
+  appendObject_(SHEETS.vendors, HEADERS.vendors, vendor);
+  return vendor;
+}
+
+function parseAmount_(value) {
+  if (typeof value === "number") return value;
+  const text = String(value || "").trim();
+  if (!text) return 0;
+  const normalized = text.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function sourceDate_(headers, row) {
+  const direct = sourceValue_(headers, row, ["fecha", "date"]);
+  if (direct) return normalizeDate_(direct);
+  const year = String(sourceValue_(headers, row, ["año", "ano", "year"]) || "").trim();
+  const month = monthNumber_(sourceValue_(headers, row, ["mes", "month"]));
+  if (year && month) return `${year}-${String(month).padStart(2, "0")}-01`;
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function monthNumber_(value) {
+  const text = normalizeKey_(value);
+  const months = {
+    ene: 1, enero: 1,
+    feb: 2, febrero: 2,
+    mar: 3, marzo: 3,
+    abr: 4, abril: 4,
+    may: 5, mayo: 5,
+    jun: 6, junio: 6,
+    jul: 7, julio: 7,
+    ago: 8, agosto: 8,
+    sep: 9, sept: 9, septiembre: 9,
+    oct: 10, octubre: 10,
+    nov: 11, noviembre: 11,
+    dic: 12, diciembre: 12,
+  };
+  return months[text] || Number(text) || "";
+}
+
+function stableImportId_(sheetName, rowNumber, brandId, description, odc) {
+  const source = odc || `${sheetName}-${rowNumber}-${brandId}-${description}`;
+  return `ADM-${slugId_(source).slice(0, 90)}`;
+}
+
+function slugId_(name) {
+  return String(name || "registro")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") || "registro";
+}
+
+function makeId_(name, existing) {
+  const base = slugId_(name);
   const ids = new Set(existing.map((item) => item.id));
   let id = base;
   let suffix = 2;
