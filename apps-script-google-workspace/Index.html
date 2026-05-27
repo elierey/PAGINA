@@ -307,7 +307,6 @@
             <button class="ghost admin-only hidden" id="settingsBtn">Configuracion</button>
             <button class="primary can-create hidden" id="newRequestBtn">Nueva solicitud</button>
             <button class="ghost" id="refreshBtn">Actualizar</button>
-            <button class="danger" id="logoutBtn">Cerrar sesion</button>
           </div>
         </header>
 
@@ -823,11 +822,6 @@
         showToast(state.data.importSummary || "Cuadro administrativo importado");
       }
 
-      async function logout() {
-        if (!(await askConfirm("La sesion la maneja Google. Para cerrar o cambiar de cuenta se cerrara la sesion de Google en este navegador.", "Cerrar sesion"))) return;
-        window.top.location.href = "https://accounts.google.com/Logout";
-      }
-
       function exportableBrands() {
         const ids = [...new Set(visibleRequests().map((r) => r.marcaId).filter(Boolean))];
         return ids.map((id) => ({ id, nombre: brandName(id) })).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
@@ -970,7 +964,6 @@
       $("sortBtn").addEventListener("click", () => $("sortDialog").showModal());
       $("exportBtn").addEventListener("click", openExportDialog);
       $("importBtn").addEventListener("click", importAdminSheet);
-      $("logoutBtn").addEventListener("click", logout);
       $("downloadCsvBtn").addEventListener("click", downloadCsv);
       $("selectAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = true; }));
       $("clearAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = false; }));

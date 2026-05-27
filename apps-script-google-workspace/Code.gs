@@ -13,13 +13,65 @@ const SHEETS = {
   audit: "auditoria",
 };
 
+const CONTROL_ADM_SHEET = "Control Adm";
+
 const SOURCE_SHEET_CANDIDATES = [
-  "Control Adm",
+  CONTROL_ADM_SHEET,
   "Control ADM",
   "Cuadro Administrativo",
   "Cuadro Administrativo - Eventos",
   "Control Administrativo",
 ];
+
+const CONTROL_ADM_HEADERS = [
+  "ODC",
+  "Factura",
+  "FAC. CARGADA",
+  "Comp",
+  "FACT. PEN SOLICITAR",
+  "FACT. SOLICITADA",
+  "marca",
+  "RAZÓN",
+  "Descripcion ",
+  "Responsable",
+  "mes",
+  "Año",
+  "PROVEEDOR ",
+  "sp",
+  "Acreedor ",
+  "ODC",
+  "monto $",
+  "Tasa",
+  "Neto ",
+  "IVA ",
+  "Total factura ",
+  "Fecha de pago ",
+  "TC Día de pago ",
+  "Diferencial Bs ",
+  "Diferencial $",
+  "CUENTA ",
+  "ORDEN/ PEP",
+  "SP",
+  "Comp",
+];
+
+const CONTROL_ADM_SYSTEM_HEADERS = ["APP_ID", "APP_ELIMINADO", "APP_ACTUALIZADO"];
+
+const CONTROL_ADM_COLS = {
+  recursosAsignados: 1,
+  factura: 2,
+  marca: 7,
+  razon: 8,
+  descripcion: 9,
+  responsable: 10,
+  mes: 11,
+  ano: 12,
+  proveedor: 13,
+  acreedor: 15,
+  ordenCompra: 16,
+  monto: 17,
+  fechaPago: 22,
+};
 
 const HEADERS = {
   users: ["id", "email", "nombre", "rol", "entidadId", "activo", "notas", "creadoEn", "actualizadoEn"],
@@ -69,6 +121,7 @@ function getIndexTemplate_() {
 function setupDatabase() {
   const ss = getSpreadsheet_();
   Object.keys(SHEETS).forEach((key) => ensureSheet_(ss, SHEETS[key], HEADERS[key]));
+  if (!getSetting_("SOURCE_SPREADSHEET_ID", "")) ensureControlAdmSheet_(ss);
 
   seedIfEmpty_(SHEETS.brands, HEADERS.brands, [
     { id: "pepsi", nombre: "Pepsi", razon: "pcv", activo: true, creadoEn: now_(), actualizadoEn: now_() },
@@ -148,6 +201,7 @@ function createRequest(payload) {
       eliminado: false,
     };
     appendObject_(SHEETS.requests, HEADERS.requests, request);
+    upsertControlAdmRow_(request, context);
     audit_("request.create", request.id, request.descripcion, context);
     return buildPayload_(context);
   });
@@ -186,6 +240,7 @@ function updateRequest(payload) {
       actualizadoEn: now_(),
     };
     writeObjectRow_(SHEETS.requests, table.headers, index + 2, updated);
+    upsertControlAdmRow_(updated, context);
     audit_("request.update", updated.id, updated.descripcion, context);
     return buildPayload_(context);
   });
@@ -215,6 +270,7 @@ function advanceRequest(id) {
       request.montoAsignado = request.montoAsignado || request.monto;
     }
     writeObjectRow_(SHEETS.requests, table.headers, index + 2, request);
+    upsertControlAdmRow_(request, context);
     audit_("request.advance", request.id, next, context);
     return buildPayload_(context);
   });
@@ -231,6 +287,7 @@ function deleteRequest(id) {
     request.actualizadoPor = context.email;
     request.actualizadoEn = now_();
     writeObjectRow_(SHEETS.requests, table.headers, index + 2, request);
+    markControlAdmRowDeleted_(request, context);
     audit_("request.delete", request.id, request.descripcion, context);
     return buildPayload_(context);
   });
@@ -251,56 +308,37 @@ function importControlAdm() {
     if (values.length < 2) throw new Error("El cuadro administrativo no tiene filas para importar.");
 
     const headers = values[0].map((header) => String(header || "").trim());
+    const system = ensureControlAdmSystemColumns_(source);
+    const requestsTable = readTable_(SHEETS.requests);
     let imported = 0;
     let updated = 0;
     let skipped = 0;
 
     values.slice(1).forEach((row, offset) => {
-      const descripcion = String(sourceValue_(headers, row, ["descripcion", "descripción", "detalle", "concepto"]) || "").trim();
-      const brandName = String(sourceValue_(headers, row, ["marca", "brand"]) || "").trim();
-      const providerName = String(sourceValue_(headers, row, ["proveedor", "vendor"]) || "").trim();
-      if (!descripcion && !brandName && !providerName) {
+      const rowNumber = offset + 2;
+      const mappedRequest = isControlAdmSheet_(source)
+        ? controlAdmRowToRequest_(source, row, rowNumber, context, system)
+        : genericSourceRowToRequest_(source, headers, row, rowNumber, context);
+      if (!mappedRequest) {
         skipped += 1;
         return;
       }
-
-      const razon = normalizeReason_(sourceValue_(headers, row, ["razon", "razón"]) || "pcv");
-      const brand = findOrCreateBrand_(brandName || "Sin marca", razon);
-      const vendor = findOrCreateVendor_(providerName || "Sin proveedor");
-      const ordenCompra = String(sourceValue_(headers, row, ["odc", "oc", "orden de compra", "orden compra", "ordenes de compra"]) || "").trim();
-      const request = {
-        id: stableImportId_(source.getName(), offset + 2, brand.id, descripcion, ordenCompra),
-        marcaId: brand.id,
-        razon,
-        descripcion: descripcion || `Solicitud ${offset + 2}`,
-        responsable: String(sourceValue_(headers, row, ["responsable", "responsable evento"]) || "").trim(),
-        fecha: sourceDate_(headers, row),
-        proveedorId: vendor.id,
-        ordenCompra,
-        monto: parseAmount_(sourceValue_(headers, row, ["monto $", "monto", "importe", "presupuesto solicitado"])),
-        recursosAsignados: toBool_(sourceValue_(headers, row, ["recursos asignados", "recursos", "asignado"])),
-        montoAsignado: parseAmount_(sourceValue_(headers, row, ["monto asignado", "monto con recursos"])),
-        pagado: toBool_(sourceValue_(headers, row, ["pagado", "factura", "facturado"])),
-        estado: "",
-        detalle: descripcion,
-        creadoPor: context.email,
-        creadoEn: now_(),
-        actualizadoPor: context.email,
-        actualizadoEn: now_(),
-        eliminado: false,
-      };
-      request.estado = request.pagado ? "Pagado" : (request.recursosAsignados ? "Recursos asignados" : "Solicitado");
-      if (request.recursosAsignados && !request.montoAsignado) request.montoAsignado = request.monto;
-
-      const table = readTable_(SHEETS.requests);
-      const index = table.objects.findIndex((item) => item.id === request.id);
-      if (index >= 0) {
-        const current = table.objects[index];
-        writeObjectRow_(SHEETS.requests, table.headers, index + 2, { ...current, ...request, creadoPor: current.creadoPor || context.email, creadoEn: current.creadoEn || now_() });
+      const mappedIndex = requestsTable.objects.findIndex((item) => item.id === mappedRequest.id);
+      if (mappedIndex >= 0) {
+        const current = requestsTable.objects[mappedIndex];
+        const merged = { ...current, ...mappedRequest, creadoPor: current.creadoPor || context.email, creadoEn: current.creadoEn || now_() };
+        writeObjectRow_(SHEETS.requests, requestsTable.headers, mappedIndex + 2, merged);
+        requestsTable.objects[mappedIndex] = merged;
         updated += 1;
       } else {
-        appendObject_(SHEETS.requests, HEADERS.requests, request);
+        appendObject_(SHEETS.requests, HEADERS.requests, mappedRequest);
+        requestsTable.objects.push(mappedRequest);
         imported += 1;
+      }
+      if (isControlAdmSheet_(source)) {
+        source.getRange(rowNumber, system.APP_ID).setValue(mappedRequest.id);
+        source.getRange(rowNumber, system.APP_ELIMINADO).setValue(false);
+        source.getRange(rowNumber, system.APP_ACTUALIZADO).setValue(now_());
       }
     });
 
@@ -655,6 +693,7 @@ function normalizeReason_(value) {
 function setupDatabaseIfNeeded_() {
   const ss = getSpreadsheet_();
   Object.keys(SHEETS).forEach((key) => ensureSheet_(ss, SHEETS[key], HEADERS[key]));
+  if (!getSetting_("SOURCE_SPREADSHEET_ID", "")) ensureControlAdmSheet_(ss);
 }
 
 function getSpreadsheet_() {
@@ -683,6 +722,51 @@ function ensureSheet_(ss, sheetName, headers) {
     }
   }
   return sheet;
+}
+
+function ensureControlAdmSheet_(ss) {
+  let sheet = ss.getSheetByName(CONTROL_ADM_SHEET);
+  if (!sheet) sheet = ss.insertSheet(CONTROL_ADM_SHEET);
+  const lastColumn = Math.max(CONTROL_ADM_HEADERS.length, sheet.getLastColumn() || 1);
+  const firstRow = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const hasHeaders = firstRow.some((cell) => String(cell || "").trim());
+  if (!hasHeaders) {
+    sheet.getRange(1, 1, 1, CONTROL_ADM_HEADERS.length).setValues([CONTROL_ADM_HEADERS]);
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, CONTROL_ADM_HEADERS.length)
+      .setBackground("#0064aa")
+      .setFontColor("#ffffff")
+      .setFontWeight("bold");
+  }
+  ensureControlAdmSystemColumns_(sheet);
+  return sheet;
+}
+
+function ensureControlAdmSystemColumns_(sheet) {
+  const maxColumns = Math.max(sheet.getLastColumn() || 1, CONTROL_ADM_HEADERS.length);
+  const headers = sheet.getRange(1, 1, 1, maxColumns).getValues()[0].map((header) => String(header || "").trim());
+  const indexes = {};
+  let nextColumn = headers.length + 1;
+  CONTROL_ADM_SYSTEM_HEADERS.forEach((header) => {
+    let index = headers.findIndex((item) => item === header) + 1;
+    if (!index) {
+      index = nextColumn;
+      sheet.getRange(1, index).setValue(header);
+      headers.push(header);
+      nextColumn += 1;
+    }
+    indexes[header] = index;
+    try {
+      sheet.hideColumns(index);
+    } catch (error) {
+      console.warn(`No se pudo ocultar ${header}: ${error.message}`);
+    }
+  });
+  return {
+    APP_ID: indexes.APP_ID,
+    APP_ELIMINADO: indexes.APP_ELIMINADO,
+    APP_ACTUALIZADO: indexes.APP_ACTUALIZADO,
+  };
 }
 
 function seedIfEmpty_(sheetName, headers, rows) {
@@ -822,6 +906,179 @@ function findSourceSheet_(ss) {
   return SOURCE_SHEET_CANDIDATES
     .map((name) => ss.getSheetByName(name))
     .find(Boolean);
+}
+
+function isControlAdmSheet_(sheet) {
+  return normalizeKey_(sheet.getName()) === normalizeKey_(CONTROL_ADM_SHEET);
+}
+
+function getControlAdmSheetForWrite_() {
+  const ss = getSourceSpreadsheet_();
+  const source = findSourceSheet_(ss);
+  return source || ensureControlAdmSheet_(ss);
+}
+
+function upsertControlAdmRow_(request, context) {
+  const source = getControlAdmSheetForWrite_();
+  const system = ensureControlAdmSystemColumns_(source);
+  const rowNumber = findControlAdmRowByAppId_(source, request.id, system) || Math.max(source.getLastRow() + 1, 2);
+  writeControlAdmRequestRow_(source, rowNumber, request, system);
+  audit_("controlAdm.upsert", request.id, `Fila ${rowNumber}`, context);
+}
+
+function markControlAdmRowDeleted_(request, context) {
+  const source = getControlAdmSheetForWrite_();
+  const system = ensureControlAdmSystemColumns_(source);
+  const rowNumber = findControlAdmRowByAppId_(source, request.id, system);
+  if (rowNumber) {
+    source.getRange(rowNumber, system.APP_ELIMINADO).setValue(true);
+    source.getRange(rowNumber, system.APP_ACTUALIZADO).setValue(now_());
+    audit_("controlAdm.delete", request.id, `Fila ${rowNumber}`, context);
+  }
+}
+
+function findControlAdmRowByAppId_(sheet, appId, system) {
+  if (!appId || !system.APP_ID || sheet.getLastRow() < 2) return 0;
+  const values = sheet.getRange(2, system.APP_ID, sheet.getLastRow() - 1, 1).getValues();
+  const index = values.findIndex((row) => String(row[0] || "").trim() === String(appId || "").trim());
+  return index >= 0 ? index + 2 : 0;
+}
+
+function writeControlAdmRequestRow_(sheet, rowNumber, request, system) {
+  const date = requestDateObject_(request.fecha);
+  const brandName = brandNameById_(request.marcaId);
+  const vendorName = vendorNameById_(request.proveedorId);
+  const amount = Number(request.monto || 0);
+  const rows = [
+    [CONTROL_ADM_COLS.recursosAsignados, toBool_(request.recursosAsignados)],
+    [CONTROL_ADM_COLS.factura, toBool_(request.pagado)],
+    [CONTROL_ADM_COLS.marca, brandName],
+    [CONTROL_ADM_COLS.razon, normalizeReason_(request.razon)],
+    [CONTROL_ADM_COLS.descripcion, request.descripcion || ""],
+    [CONTROL_ADM_COLS.responsable, request.responsable || ""],
+    [CONTROL_ADM_COLS.mes, date || ""],
+    [CONTROL_ADM_COLS.ano, date ? date.getFullYear() : ""],
+    [CONTROL_ADM_COLS.proveedor, vendorName],
+    [CONTROL_ADM_COLS.ordenCompra, request.ordenCompra || ""],
+    [CONTROL_ADM_COLS.monto, amount],
+  ];
+  rows.forEach(([column, value]) => sheet.getRange(rowNumber, column).setValue(value));
+  sheet.getRange(rowNumber, system.APP_ID).setValue(request.id);
+  sheet.getRange(rowNumber, system.APP_ELIMINADO).setValue(false);
+  sheet.getRange(rowNumber, system.APP_ACTUALIZADO).setValue(now_());
+}
+
+function controlAdmRowToRequest_(source, row, rowNumber, context, system) {
+  if (toBool_(row[system.APP_ELIMINADO - 1])) return null;
+  const descripcion = String(controlAdmCell_(row, CONTROL_ADM_COLS.descripcion) || "").trim();
+  const brandName = String(controlAdmCell_(row, CONTROL_ADM_COLS.marca) || "").trim();
+  const providerName = String(controlAdmCell_(row, CONTROL_ADM_COLS.proveedor) || "").trim();
+  if (!descripcion && !brandName && !providerName) return null;
+
+  const razon = normalizeReason_(controlAdmCell_(row, CONTROL_ADM_COLS.razon) || "pcv");
+  const brand = findOrCreateBrand_(brandName || "Sin marca", razon);
+  const vendor = findOrCreateVendor_(providerName || "Sin proveedor");
+  const ordenCompra = String(controlAdmCell_(row, CONTROL_ADM_COLS.ordenCompra) || "").trim();
+  const amount = parseAmount_(controlAdmCell_(row, CONTROL_ADM_COLS.monto));
+  const paid = toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.factura)) || Boolean(controlAdmCell_(row, CONTROL_ADM_COLS.fechaPago));
+  const resources = toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.recursosAsignados)) || Boolean(ordenCompra);
+  const appId = String(row[system.APP_ID - 1] || "").trim();
+  const id = appId || stableImportId_(source.getName(), rowNumber, brand.id, descripcion, ordenCompra);
+  return {
+    id,
+    marcaId: brand.id,
+    razon,
+    descripcion: descripcion || `Solicitud ${rowNumber}`,
+    responsable: String(controlAdmCell_(row, CONTROL_ADM_COLS.responsable) || "").trim(),
+    fecha: controlAdmDate_(controlAdmCell_(row, CONTROL_ADM_COLS.mes), controlAdmCell_(row, CONTROL_ADM_COLS.ano)),
+    proveedorId: vendor.id,
+    ordenCompra,
+    monto: amount,
+    recursosAsignados: resources,
+    montoAsignado: resources ? amount : 0,
+    pagado: paid,
+    estado: paid ? "Pagado" : (resources ? "Recursos asignados" : "Solicitado"),
+    detalle: descripcion,
+    creadoPor: context.email,
+    creadoEn: now_(),
+    actualizadoPor: context.email,
+    actualizadoEn: now_(),
+    eliminado: false,
+  };
+}
+
+function genericSourceRowToRequest_(source, headers, row, rowNumber, context) {
+  const descripcion = String(sourceValue_(headers, row, ["descripcion", "descripcion ", "descripción", "detalle", "concepto"]) || "").trim();
+  const brandName = String(sourceValue_(headers, row, ["marca", "brand"]) || "").trim();
+  const providerName = String(sourceValue_(headers, row, ["proveedor", "proveedor ", "vendor"]) || "").trim();
+  if (!descripcion && !brandName && !providerName) return null;
+
+  const razon = normalizeReason_(sourceValue_(headers, row, ["razon", "razón"]) || "pcv");
+  const brand = findOrCreateBrand_(brandName || "Sin marca", razon);
+  const vendor = findOrCreateVendor_(providerName || "Sin proveedor");
+  const ordenCompra = String(sourceValue_(headers, row, ["odc", "oc", "orden de compra", "orden compra", "ordenes de compra"]) || "").trim();
+  const amount = parseAmount_(sourceValue_(headers, row, ["monto $", "monto", "importe", "presupuesto solicitado"]));
+  const resources = toBool_(sourceValue_(headers, row, ["recursos asignados", "recursos", "asignado"])) || Boolean(ordenCompra);
+  const paid = toBool_(sourceValue_(headers, row, ["pagado", "factura", "facturado"]));
+  return {
+    id: stableImportId_(source.getName(), rowNumber, brand.id, descripcion, ordenCompra),
+    marcaId: brand.id,
+    razon,
+    descripcion: descripcion || `Solicitud ${rowNumber}`,
+    responsable: String(sourceValue_(headers, row, ["responsable", "responsable evento"]) || "").trim(),
+    fecha: sourceDate_(headers, row),
+    proveedorId: vendor.id,
+    ordenCompra,
+    monto: amount,
+    recursosAsignados: resources,
+    montoAsignado: resources ? amount : parseAmount_(sourceValue_(headers, row, ["monto asignado", "monto con recursos"])),
+    pagado: paid,
+    estado: paid ? "Pagado" : (resources ? "Recursos asignados" : "Solicitado"),
+    detalle: descripcion,
+    creadoPor: context.email,
+    creadoEn: now_(),
+    actualizadoPor: context.email,
+    actualizadoEn: now_(),
+    eliminado: false,
+  };
+}
+
+function controlAdmCell_(row, column) {
+  return normalizeValue_(row[column - 1]);
+}
+
+function brandNameById_(id) {
+  const brands = readObjects_(SHEETS.brands);
+  const brand = brands.find((item) => String(item.id || "") === String(id || ""));
+  return brand ? brand.nombre : id;
+}
+
+function vendorNameById_(id) {
+  const vendors = readObjects_(SHEETS.vendors);
+  const vendor = vendors.find((item) => String(item.id || "") === String(id || ""));
+  return vendor ? vendor.nombre : id;
+}
+
+function requestDateObject_(value) {
+  const normalized = normalizeDate_(value);
+  if (!normalized) return null;
+  const parts = normalized.split("-").map(Number);
+  if (parts.length < 3 || !parts[0] || !parts[1]) return null;
+  return new Date(parts[0], parts[1] - 1, parts[2] || 1);
+}
+
+function controlAdmDate_(monthValue, yearValue) {
+  const direct = requestDateObject_(monthValue);
+  if (direct) return normalizeDate_(direct);
+  const year = parseYear_(yearValue) || parseYear_(monthValue) || new Date().getFullYear();
+  const month = monthNumber_(monthValue) || 1;
+  return `${year}-${String(month).padStart(2, "0")}-01`;
+}
+
+function parseYear_(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]") return value.getFullYear();
+  const match = String(value || "").match(/\d{4}/);
+  return match ? Number(match[0]) : "";
 }
 
 function sourceValue_(headers, row, names) {
