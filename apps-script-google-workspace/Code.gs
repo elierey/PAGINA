@@ -174,10 +174,10 @@ function getBootstrapData() {
 
 function createRequest(payload) {
   return withWriteLock_(() => {
-    const context = requireRole_(["admin"]);
+    const context = requireRole_(["admin", "marca"]);
     validateRequest_(payload, context);
     const amount = Number(payload.monto || 0);
-    const resourcesAssigned = toBool_(payload.recursosAsignados);
+    const resourcesAssigned = Boolean(String(payload.ordenCompra || "").trim());
     const brandId = context.role === "marca" ? resolveBrandId_(context.entidadId) : payload.marcaId;
     const request = {
       id: makeRequestId_(),
@@ -192,7 +192,7 @@ function createRequest(payload) {
       recursosAsignados: resourcesAssigned,
       montoAsignado: resourcesAssigned ? amount : Number(payload.montoAsignado || 0),
       pagado: toBool_(payload.pagado),
-      estado: payload.estado || (resourcesAssigned ? "Recursos asignados" : "Solicitado"),
+      estado: payload.estado || (resourcesAssigned ? "Procesada" : "Pendiente"),
       detalle: payload.detalle || payload.descripcion,
       creadoPor: context.email,
       creadoEn: now_(),
@@ -200,6 +200,7 @@ function createRequest(payload) {
       actualizadoEn: now_(),
       eliminado: false,
     };
+    normalizeBusinessState_(request);
     appendObject_(SHEETS.requests, HEADERS.requests, request);
     upsertControlAdmRow_(request, context);
     audit_("request.create", request.id, request.descripcion, context);
@@ -219,7 +220,7 @@ function updateRequest(payload) {
     }
     validateRequest_({ ...current, ...payload }, context);
     const amount = Number(payload.monto || current.monto || 0);
-    const resourcesAssigned = toBool_(payload.recursosAsignados);
+    const resourcesAssigned = Boolean(String(payload.ordenCompra || "").trim());
     const brandId = context.role === "marca" ? resolveBrandId_(context.entidadId) : payload.marcaId;
     const updated = {
       ...current,
@@ -234,14 +235,34 @@ function updateRequest(payload) {
       recursosAsignados: resourcesAssigned,
       montoAsignado: resourcesAssigned ? (Number(payload.montoAsignado || 0) || amount) : Number(payload.montoAsignado || 0),
       pagado: toBool_(payload.pagado),
-      estado: payload.estado || current.estado || "Solicitado",
+      estado: payload.estado || current.estado || "Pendiente",
       detalle: payload.detalle || payload.descripcion,
       actualizadoPor: context.email,
       actualizadoEn: now_(),
     };
+    normalizeBusinessState_(updated);
     writeObjectRow_(SHEETS.requests, table.headers, index + 2, updated);
     upsertControlAdmRow_(updated, context);
     audit_("request.update", updated.id, updated.descripcion, context);
+    return buildPayload_(context);
+  });
+}
+
+function setPaidStatus(id, paid) {
+  return withWriteLock_(() => {
+    const context = requireRole_(["admin"]);
+    const table = readTable_(SHEETS.requests);
+    const index = table.objects.findIndex((item) => item.id === id && !toBool_(item.eliminado));
+    if (index < 0) throw new Error("Solicitud no encontrada.");
+    const request = table.objects[index];
+    if (!hasOrder_(request)) throw new Error("Solo se puede marcar pago cuando la solicitud tiene ODC.");
+    request.pagado = toBool_(paid);
+    request.actualizadoPor = context.email;
+    request.actualizadoEn = now_();
+    normalizeBusinessState_(request);
+    writeObjectRow_(SHEETS.requests, table.headers, index + 2, request);
+    upsertControlAdmRow_(request, context);
+    audit_("request.paidStatus", request.id, request.pagado ? "Paga" : "No paga", context);
     return buildPayload_(context);
   });
 }
@@ -253,25 +274,12 @@ function advanceRequest(id) {
     const index = table.objects.findIndex((item) => item.id === id && !toBool_(item.eliminado));
     if (index < 0) throw new Error("Solicitud no encontrada.");
     const request = table.objects[index];
-    const flow = ["Solicitado", "Cotizando", "Aprobado", "Recursos asignados", "Pagado"];
-    const current = flow.indexOf(request.estado);
-    const next = flow[current + 1];
-    if (!next) return buildPayload_(context);
-    request.estado = next;
     request.actualizadoPor = context.email;
     request.actualizadoEn = now_();
-    if (next === "Recursos asignados") {
-      request.recursosAsignados = true;
-      request.montoAsignado = request.montoAsignado || request.monto;
-    }
-    if (next === "Pagado") {
-      request.pagado = true;
-      request.recursosAsignados = true;
-      request.montoAsignado = request.montoAsignado || request.monto;
-    }
+    normalizeBusinessState_(request);
     writeObjectRow_(SHEETS.requests, table.headers, index + 2, request);
     upsertControlAdmRow_(request, context);
-    audit_("request.advance", request.id, next, context);
+    audit_("request.refreshState", request.id, request.estado, context);
     return buildPayload_(context);
   });
 }
@@ -605,9 +613,18 @@ function resolveEntityIds_(sheetName, entidadId, fields) {
       const aliases = fields
         .map((field) => normalizeKey_(item[field]))
         .filter(Boolean);
-      return aliases.includes(target) || aliases.some((alias) => target.length >= 4 && (alias.startsWith(target) || target.startsWith(alias)));
+      return aliases.includes(target) || aliases.some((alias) => entityAliasMatches_(target, alias));
     })
     .map((item) => item.id);
+}
+
+function entityAliasMatches_(target, alias) {
+  if (!target || !alias) return false;
+  if (target === alias) return true;
+  if (target.length >= 4 && alias.length >= 4 && (alias.includes(target) || target.includes(alias))) return true;
+  const targetTokens = target.split(" ").filter((token) => token.length >= 3);
+  const aliasTokens = alias.split(" ").filter((token) => token.length >= 3);
+  return aliasTokens.some((token) => targetTokens.includes(token));
 }
 
 function filterRequests_(requests, context) {
@@ -626,13 +643,17 @@ function filterRequests_(requests, context) {
 function summarize_(requests) {
   return requests.reduce((stats, request) => {
     const amount = Number(request.monto || 0);
-    const assigned = Number(request.montoAsignado || 0);
-    stats.count += 1;
-    stats.requested += amount;
-    stats.assigned += assigned;
-    stats.pending += toBool_(request.pagado) ? 0 : (assigned || amount);
+    const hasOrder = hasOrder_(request);
+    stats.totalCount += 1;
+    stats.totalAmount += amount;
+    if (!hasOrder) stats.pendingCount += 1;
+    if (!toBool_(request.pagado)) stats.pendingAmount += amount;
+    stats.count = stats.totalCount;
+    stats.requested = stats.totalAmount;
+    stats.assigned += hasOrder ? amount : 0;
+    stats.pending = stats.pendingAmount;
     return stats;
-  }, { count: 0, requested: 0, assigned: 0, pending: 0 });
+  }, { pendingCount: 0, pendingAmount: 0, totalCount: 0, totalAmount: 0, count: 0, requested: 0, assigned: 0, pending: 0 });
 }
 
 function validateRequest_(payload, context) {
@@ -688,6 +709,20 @@ function normalizeReason_(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "opc") return "apc";
   return normalized;
+}
+
+function hasOrder_(request) {
+  return String(request && request.ordenCompra || "").trim() !== "";
+}
+
+function normalizeBusinessState_(request) {
+  const withOrder = hasOrder_(request);
+  const amount = Number(request.monto || 0);
+  request.recursosAsignados = withOrder;
+  request.montoAsignado = withOrder ? (Number(request.montoAsignado || 0) || amount) : 0;
+  request.pagado = withOrder ? toBool_(request.pagado) : false;
+  request.estado = withOrder ? (request.pagado ? "Paga" : "Procesada") : "Pendiente";
+  return request;
 }
 
 function setupDatabaseIfNeeded_() {
@@ -982,10 +1017,10 @@ function controlAdmRowToRequest_(source, row, rowNumber, context, system) {
   const ordenCompra = String(controlAdmCell_(row, CONTROL_ADM_COLS.ordenCompra) || "").trim();
   const amount = parseAmount_(controlAdmCell_(row, CONTROL_ADM_COLS.monto));
   const paid = toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.factura)) || Boolean(controlAdmCell_(row, CONTROL_ADM_COLS.fechaPago));
-  const resources = toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.recursosAsignados)) || Boolean(ordenCompra);
+  const resources = Boolean(ordenCompra) || toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.recursosAsignados));
   const appId = String(row[system.APP_ID - 1] || "").trim();
   const id = appId || stableImportId_(source.getName(), rowNumber, brand.id, descripcion, ordenCompra);
-  return {
+  return normalizeBusinessState_({
     id,
     marcaId: brand.id,
     razon,
@@ -998,14 +1033,14 @@ function controlAdmRowToRequest_(source, row, rowNumber, context, system) {
     recursosAsignados: resources,
     montoAsignado: resources ? amount : 0,
     pagado: paid,
-    estado: paid ? "Pagado" : (resources ? "Recursos asignados" : "Solicitado"),
+    estado: "",
     detalle: descripcion,
     creadoPor: context.email,
     creadoEn: now_(),
     actualizadoPor: context.email,
     actualizadoEn: now_(),
     eliminado: false,
-  };
+  });
 }
 
 function genericSourceRowToRequest_(source, headers, row, rowNumber, context) {
@@ -1019,9 +1054,9 @@ function genericSourceRowToRequest_(source, headers, row, rowNumber, context) {
   const vendor = findOrCreateVendor_(providerName || "Sin proveedor");
   const ordenCompra = String(sourceValue_(headers, row, ["odc", "oc", "orden de compra", "orden compra", "ordenes de compra"]) || "").trim();
   const amount = parseAmount_(sourceValue_(headers, row, ["monto $", "monto", "importe", "presupuesto solicitado"]));
-  const resources = toBool_(sourceValue_(headers, row, ["recursos asignados", "recursos", "asignado"])) || Boolean(ordenCompra);
+  const resources = Boolean(ordenCompra) || toBool_(sourceValue_(headers, row, ["recursos asignados", "recursos", "asignado"]));
   const paid = toBool_(sourceValue_(headers, row, ["pagado", "factura", "facturado"]));
-  return {
+  return normalizeBusinessState_({
     id: stableImportId_(source.getName(), rowNumber, brand.id, descripcion, ordenCompra),
     marcaId: brand.id,
     razon,
@@ -1034,14 +1069,14 @@ function genericSourceRowToRequest_(source, headers, row, rowNumber, context) {
     recursosAsignados: resources,
     montoAsignado: resources ? amount : parseAmount_(sourceValue_(headers, row, ["monto asignado", "monto con recursos"])),
     pagado: paid,
-    estado: paid ? "Pagado" : (resources ? "Recursos asignados" : "Solicitado"),
+    estado: "",
     detalle: descripcion,
     creadoPor: context.email,
     creadoEn: now_(),
     actualizadoPor: context.email,
     actualizadoEn: now_(),
     eliminado: false,
-  };
+  });
 }
 
 function controlAdmCell_(row, column) {

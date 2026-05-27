@@ -186,6 +186,8 @@
       .pill.ok { background: var(--green); color: #fff; }
       .pill.bad { background: #ffe1e4; color: #8f1e28; }
       .pill.paid { background: #d9f1e7; color: #00513a; }
+      .pay-toggle { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; font-weight: 900; color: var(--ink); }
+      .pay-toggle input { width: auto; min-height: 0; }
       .vendor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 18px; }
       .vendor-item { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--soft); }
       dialog { border: 0; border-radius: 8px; padding: 0; width: min(900px, calc(100vw - 30px)); box-shadow: 0 28px 80px rgba(0,0,0,.28); }
@@ -313,21 +315,18 @@
         <section id="errorBox" class="error hidden"></section>
 
         <section class="metrics">
-          <article class="metric"><span>Registros visibles</span><strong id="statCount">0</strong></article>
-          <article class="metric"><span>Presupuesto solicitado</span><strong id="statRequested">$0</strong></article>
-          <article class="metric"><span>Monto con recursos</span><strong id="statAssigned">$0</strong></article>
-          <article class="metric"><span>Por pagar / debe</span><strong id="statPending">$0</strong></article>
+          <article class="metric"><span>Solicitudes pendientes</span><strong id="statCount">0</strong></article>
+          <article class="metric"><span>Monto pendiente por pagar</span><strong id="statRequested">$0</strong></article>
+          <article class="metric"><span>Solicitudes totales</span><strong id="statAssigned">0</strong></article>
+          <article class="metric"><span>Monto total general</span><strong id="statPending">$0</strong></article>
         </section>
 
         <section class="filters">
           <input id="searchInput" type="search" placeholder="Buscar descripcion, proveedor, marca o responsable">
           <select id="statusFilter">
             <option value="">Todos los estados</option>
-            <option>Solicitado</option>
-            <option>Cotizando</option>
-            <option>Aprobado</option>
-            <option>Recursos asignados</option>
-            <option>Pagado</option>
+            <option>Pendiente</option>
+            <option>Pagada</option>
           </select>
         </section>
 
@@ -355,7 +354,7 @@
                   <th>Proveedor</th>
                   <th>ODC</th>
                   <th>Monto</th>
-                  <th>Recursos</th>
+                  <th>Estado / pago</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -392,9 +391,7 @@
           <label>Proveedor<select id="requestVendor" required></select></label>
           <label>ODC / Orden de compra<input id="requestOrder"></label>
           <label>Monto<input id="requestAmount" type="number" step="0.01" min="0" required></label>
-          <label>Estado<select id="requestStatus"><option>Solicitado</option><option>Cotizando</option><option>Aprobado</option><option>Recursos asignados</option><option>Pagado</option></select></label>
-          <label class="check"><input id="requestResources" type="checkbox"> Recursos asignados</label>
-          <label class="check"><input id="requestPaid" type="checkbox"> Pagado</label>
+          <label class="check"><input id="requestPaid" type="checkbox"> Paga</label>
         </div>
         <label>Detalle<textarea id="requestDetail" rows="3"></textarea></label>
         <div class="modal-actions">
@@ -518,6 +515,18 @@
         return reason === "opc" ? "apc" : reason;
       }
 
+      function hasOrder(request) {
+        return String(request?.ordenCompra || "").trim().length > 0;
+      }
+
+      function requestStateLabel(request) {
+        return hasOrder(request) ? "Pagada" : "Pendiente";
+      }
+
+      function paymentText(request) {
+        return request?.pagado ? "Paga" : "No paga";
+      }
+
       async function load() {
         showError("");
         try {
@@ -541,16 +550,31 @@
         }
       }
 
-      function visibleRequests() {
+      function scopedRequests() {
         let rows = [...(state.data?.requests || [])];
         if (state.data.user.role === "admin") {
           if (state.currentView === "marca" && state.viewer) rows = rows.filter((r) => r.marcaId === state.viewer);
           if (state.currentView === "proveedor" && state.viewer) rows = rows.filter((r) => r.proveedorId === state.viewer);
         }
-        if (state.status) rows = rows.filter((r) => r.estado === state.status);
+        return rows;
+      }
+
+      function visibleRequests() {
+        let rows = scopedRequests();
+        if (state.status) rows = rows.filter((r) => requestStateLabel(r) === state.status);
         if (state.search) {
           const needle = state.search.toLowerCase();
-          rows = rows.filter((r) => [r.descripcion, r.detalle, r.responsable, r.estado, reasonLabel(r.razon), brandName(r.marcaId), vendorName(r.proveedorId)].join(" ").toLowerCase().includes(needle));
+          rows = rows.filter((r) => [
+            r.descripcion,
+            r.detalle,
+            r.responsable,
+            requestStateLabel(r),
+            paymentText(r),
+            r.ordenCompra,
+            reasonLabel(r.razon),
+            brandName(r.marcaId),
+            vendorName(r.proveedorId),
+          ].join(" ").toLowerCase().includes(needle));
         }
         if (state.sort === "amount") rows.sort((a, b) => Number(b.monto || 0) - Number(a.monto || 0));
         if (state.sort === "recent") rows.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
@@ -562,7 +586,7 @@
         const user = state.data.user;
         $("userCard").innerHTML = `<strong>${esc(user.nombre || user.email)}</strong><span>${esc(user.email)} - ${esc(user.role)}</span>`;
         document.querySelectorAll(".admin-only").forEach((el) => el.classList.toggle("hidden", user.role !== "admin"));
-        document.querySelectorAll(".can-create").forEach((el) => el.classList.toggle("hidden", user.role !== "admin"));
+        document.querySelectorAll(".can-create").forEach((el) => el.classList.toggle("hidden", !["admin", "marca"].includes(user.role)));
         $("roleTabs").classList.toggle("hidden", user.role !== "admin");
         $("viewerPanel").classList.toggle("hidden", user.role !== "admin");
         document.querySelectorAll(".role-button").forEach((button) => button.classList.toggle("active", button.dataset.view === state.currentView));
@@ -578,7 +602,7 @@
         if (state.currentView === "admin") {
           select.innerHTML = `<option value="">Todo el sistema</option>`;
           state.viewer = "";
-          $("accessText").textContent = "El administrador ve todas las marcas, solicitudes, proveedores, montos y recursos.";
+          $("accessText").textContent = "El administrador ve todas las marcas, solicitudes, proveedores, ODC y pagos.";
           return;
         }
         const source = state.currentView === "marca" ? state.data.allBrands : state.data.allVendors;
@@ -589,20 +613,19 @@
       }
 
       function renderMetrics() {
-        const rows = visibleRequests();
+        const rows = scopedRequests();
         const stats = rows.reduce((s, r) => {
           const amount = Number(r.monto || 0);
-          const assigned = Number(r.montoAsignado || 0);
-          s.count += 1;
-          s.requested += amount;
-          s.assigned += assigned;
-          s.pending += r.pagado ? 0 : (assigned || amount);
+          s.totalCount += 1;
+          s.totalAmount += amount;
+          if (!hasOrder(r)) s.pendingCount += 1;
+          if (!r.pagado) s.pendingAmount += amount;
           return s;
-        }, { count: 0, requested: 0, assigned: 0, pending: 0 });
-        $("statCount").textContent = stats.count;
-        $("statRequested").textContent = money(stats.requested);
-        $("statAssigned").textContent = money(stats.assigned);
-        $("statPending").textContent = money(stats.pending);
+        }, { pendingCount: 0, pendingAmount: 0, totalCount: 0, totalAmount: 0 });
+        $("statCount").textContent = stats.pendingCount;
+        $("statRequested").textContent = money(stats.pendingAmount);
+        $("statAssigned").textContent = stats.totalCount;
+        $("statPending").textContent = money(stats.totalAmount);
       }
 
       function renderRequests() {
@@ -610,8 +633,8 @@
         $("requestCount").textContent = `${rows.length} registros`;
         $("requestsBody").innerHTML = rows.map((r) => {
           const canEdit = state.data.user.role === "admin";
-          const canAdvance = state.data.user.role === "admin" && r.estado !== "Pagado";
           const canDelete = state.data.user.role === "admin";
+          const processed = hasOrder(r);
           return `
             <tr>
               <td><strong>${esc(brandName(r.marcaId))}</strong></td>
@@ -620,12 +643,16 @@
               <td>${esc(r.responsable || "")}</td>
               <td>${esc(String(r.fecha || "").slice(0, 10))}</td>
               <td>${esc(vendorName(r.proveedorId))}</td>
-              <td>${esc(r.ordenCompra || "")}</td>
-              <td><strong>${money(r.monto)}</strong><span class="pill ${r.pagado ? "paid" : "bad"}">${r.pagado ? "Pagado" : "Pendiente"}</span></td>
-              <td><span class="pill ${r.recursosAsignados ? "ok" : "bad"}">${r.recursosAsignados ? "Si" : "No"}</span><div class="sub">${r.recursosAsignados ? `${money(r.montoAsignado)} asignado` : "Pendiente por asignar"}</div></td>
+              <td>${processed ? esc(r.ordenCompra) : `<span class="pill bad">Sin ODC</span>`}</td>
+              <td><strong>${money(r.monto)}</strong></td>
+              <td>
+                <span class="pill ${processed ? "paid" : "bad"}">${esc(requestStateLabel(r))}</span>
+                ${processed && canEdit
+                  ? `<label class="pay-toggle"><input type="checkbox" data-paid-toggle="${esc(r.id)}" ${r.pagado ? "checked" : ""}> ${esc(paymentText(r))}</label>`
+                  : `<div class="sub">${processed ? esc(paymentText(r)) : "Sin ODC"}</div>`}
+              </td>
               <td><div class="row-actions">
                 ${canEdit ? `<button class="ghost" data-edit="${esc(r.id)}">Editar</button>` : ""}
-                ${canAdvance ? `<button class="ghost" data-advance="${esc(r.id)}">Avanzar</button>` : ""}
                 ${canDelete ? `<button class="danger" data-delete-request="${esc(r.id)}" data-delete-name="${esc(r.descripcion || r.id)}">Eliminar</button>` : ""}
               </div></td>
             </tr>`;
@@ -656,11 +683,18 @@
         }
       }
 
+      function syncPaidAvailability() {
+        const enabled = String($("requestOrder").value || "").trim().length > 0;
+        $("requestPaid").disabled = !enabled;
+        if (!enabled) $("requestPaid").checked = false;
+      }
+
       function openNewRequest() {
         $("requestDialogTitle").textContent = "Nueva solicitud";
         $("requestForm").reset();
         $("requestId").value = "";
         renderRequestOptions();
+        syncPaidAvailability();
         $("requestDialog").showModal();
       }
 
@@ -668,6 +702,7 @@
         const request = state.data.requests.find((r) => r.id === id);
         if (!request) return;
         $("requestDialogTitle").textContent = "Editar solicitud";
+        renderRequestOptions();
         $("requestId").value = request.id;
         $("requestBrand").value = request.marcaId;
         $("requestReason").value = reasonLabel(request.razon);
@@ -677,10 +712,9 @@
         $("requestVendor").value = request.proveedorId;
         $("requestOrder").value = request.ordenCompra || "";
         $("requestAmount").value = request.monto || 0;
-        $("requestStatus").value = request.estado || "Solicitado";
-        $("requestResources").checked = Boolean(request.recursosAsignados);
         $("requestPaid").checked = Boolean(request.pagado);
         $("requestDetail").value = request.detalle || "";
+        syncPaidAvailability();
         $("requestDialog").showModal();
       }
 
@@ -696,8 +730,8 @@
           proveedorId: $("requestVendor").value,
           ordenCompra: $("requestOrder").value,
           monto: Number($("requestAmount").value || 0),
-          estado: $("requestStatus").value,
-          recursosAsignados: $("requestResources").checked,
+          estado: String($("requestOrder").value || "").trim() ? ($("requestPaid").checked ? "Paga" : "Procesada") : "Pendiente",
+          recursosAsignados: String($("requestOrder").value || "").trim().length > 0,
           pagado: $("requestPaid").checked,
           detalle: $("requestDetail").value,
         };
@@ -707,10 +741,10 @@
         showToast(request.id ? "Solicitud actualizada" : "Solicitud creada");
       }
 
-      async function advanceRequest(id) {
-        state.data = await callServer("advanceRequest", id);
+      async function setPaidStatus(input) {
+        state.data = await callServer("setPaidStatus", input.dataset.paidToggle, input.checked);
         render();
-        showToast("Solicitud avanzada");
+        showToast(input.checked ? "Solicitud marcada como paga" : "Solicitud marcada como no paga");
       }
 
       async function deleteRequest(button) {
@@ -863,13 +897,13 @@
         if (!selected.size) return showToast("Selecciona al menos una marca");
         const rows = visibleRequests().filter((request) => selected.has(request.marcaId) && isWithinExportDates(request));
         if (!rows.length) return showToast("No hay solicitudes para exportar con esos filtros");
-        const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "ODC", "Monto", "Recursos asignados", "Monto asignado", "Pagado", "Estado"];
+        const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "ODC", "Monto", "Estado", "Pago manual"];
         const lines = [
           headers.map(csvCell).join(";"),
           ...rows.map((request) => [
             brandName(request.marcaId), reasonLabel(request.razon), request.descripcion, request.detalle, request.responsable,
-            request.fecha, vendorName(request.proveedorId), request.ordenCompra, Number(request.monto || 0), request.recursosAsignados ? "Si" : "No",
-            Number(request.montoAsignado || 0), request.pagado ? "Si" : "No", request.estado,
+            request.fecha, vendorName(request.proveedorId), request.ordenCompra, Number(request.monto || 0), requestStateLabel(request),
+            paymentText(request),
           ].map(csvCell).join(";")),
         ];
         const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" });
@@ -946,8 +980,6 @@
           if (sort) applySort(sort.dataset.sort);
           const edit = event.target.closest("[data-edit]");
           if (edit) openEditRequest(edit.dataset.edit);
-          const advance = event.target.closest("[data-advance]");
-          if (advance) await advanceRequest(advance.dataset.advance);
           const deleteReq = event.target.closest("[data-delete-request]");
           if (deleteReq) await deleteRequest(deleteReq);
           const deleteSettingBtn = event.target.closest("[data-delete-kind]");
@@ -972,6 +1004,7 @@
         $("exportFrom").value = "";
         $("exportTo").value = "";
       });
+      $("requestOrder").addEventListener("input", syncPaidAvailability);
       $("exportDay").addEventListener("change", () => {
         if ($("exportDay").value) {
           $("exportFrom").value = "";
@@ -985,6 +1018,15 @@
         state.viewer = event.target.value;
         renderMetrics();
         renderRequests();
+      });
+      document.addEventListener("change", async (event) => {
+        try {
+          const paidToggle = event.target.closest("[data-paid-toggle]");
+          if (paidToggle) await setPaidStatus(paidToggle);
+        } catch (error) {
+          showError(error.message);
+          showToast("Error");
+        }
       });
       $("searchInput").addEventListener("input", (event) => {
         state.search = event.target.value;
