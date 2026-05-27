@@ -888,9 +888,10 @@ function toBool_(value) {
 }
 
 function syncControlAdmIfAvailable_(context) {
-  const intervalMinutes = Number(getSetting_("AUTO_SYNC_CONTROL_ADM_INTERVAL_MINUTES", "5")) || 5;
+  const configuredInterval = Number(getSetting_("AUTO_SYNC_CONTROL_ADM_INTERVAL_MINUTES", "0"));
+  const intervalMinutes = Number.isFinite(configuredInterval) ? configuredInterval : 0;
   const lastSync = Number(getSetting_("LAST_CONTROL_ADM_SYNC_MS", "0")) || 0;
-  if (lastSync && Date.now() - lastSync < intervalMinutes * 60 * 1000) return "";
+  if (intervalMinutes > 0 && lastSync && Date.now() - lastSync < intervalMinutes * 60 * 1000) return "";
   const ss = getSourceSpreadsheet_();
   if (!findSourceSheet_(ss)) return "";
   const payload = importControlAdm();
