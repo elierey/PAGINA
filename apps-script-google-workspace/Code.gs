@@ -60,6 +60,7 @@ const CONTROL_ADM_SYSTEM_HEADERS = ["APP_ID", "APP_ELIMINADO", "APP_ACTUALIZADO"
 const CONTROL_ADM_COLS = {
   recursosAsignados: 1,
   factura: 2,
+  facturaSolicitada: 6,
   marca: 7,
   razon: 8,
   descripcion: 9,
@@ -192,7 +193,7 @@ function createRequest(payload) {
       recursosAsignados: resourcesAssigned,
       montoAsignado: resourcesAssigned ? amount : Number(payload.montoAsignado || 0),
       pagado: toBool_(payload.pagado),
-      estado: payload.estado || (resourcesAssigned ? "Procesada" : "Pendiente"),
+      estado: payload.estado || (resourcesAssigned ? "Con orden de compra" : "Sin orden de compra"),
       detalle: payload.detalle || payload.descripcion,
       creadoPor: context.email,
       creadoEn: now_(),
@@ -235,7 +236,7 @@ function updateRequest(payload) {
       recursosAsignados: resourcesAssigned,
       montoAsignado: resourcesAssigned ? (Number(payload.montoAsignado || 0) || amount) : Number(payload.montoAsignado || 0),
       pagado: toBool_(payload.pagado),
-      estado: payload.estado || current.estado || "Pendiente",
+      estado: payload.estado || current.estado || "Sin orden de compra",
       detalle: payload.detalle || payload.descripcion,
       actualizadoPor: context.email,
       actualizadoEn: now_(),
@@ -255,14 +256,14 @@ function setPaidStatus(id, paid) {
     const index = table.objects.findIndex((item) => item.id === id && !toBool_(item.eliminado));
     if (index < 0) throw new Error("Solicitud no encontrada.");
     const request = table.objects[index];
-    if (!hasOrder_(request)) throw new Error("Solo se puede marcar pago cuando la solicitud tiene ODC.");
+    if (!hasOrder_(request)) throw new Error("Solo se puede marcar factura solicitada cuando la solicitud tiene ODC.");
     request.pagado = toBool_(paid);
     request.actualizadoPor = context.email;
     request.actualizadoEn = now_();
     normalizeBusinessState_(request);
     writeObjectRow_(SHEETS.requests, table.headers, index + 2, request);
     upsertControlAdmRow_(request, context);
-    audit_("request.paidStatus", request.id, request.pagado ? "Paga" : "No paga", context);
+    audit_("request.invoiceStatus", request.id, request.pagado ? "Factura solicitada" : "Sin factura solicitada", context);
     return buildPayload_(context);
   });
 }
@@ -647,7 +648,7 @@ function summarize_(requests) {
     stats.totalCount += 1;
     stats.totalAmount += amount;
     if (!hasOrder) stats.pendingCount += 1;
-    if (!toBool_(request.pagado)) stats.pendingAmount += amount;
+    if (!hasOrder) stats.pendingAmount += amount;
     stats.count = stats.totalCount;
     stats.requested = stats.totalAmount;
     stats.assigned += hasOrder ? amount : 0;
@@ -721,7 +722,7 @@ function normalizeBusinessState_(request) {
   request.recursosAsignados = withOrder;
   request.montoAsignado = withOrder ? (Number(request.montoAsignado || 0) || amount) : 0;
   request.pagado = withOrder ? toBool_(request.pagado) : false;
-  request.estado = withOrder ? (request.pagado ? "Paga" : "Procesada") : "Pendiente";
+  request.estado = withOrder ? (request.pagado ? "Factura solicitada" : "Con orden de compra") : "Sin orden de compra";
   return request;
 }
 
@@ -987,7 +988,7 @@ function writeControlAdmRequestRow_(sheet, rowNumber, request, system) {
   const amount = Number(request.monto || 0);
   const rows = [
     [CONTROL_ADM_COLS.recursosAsignados, toBool_(request.recursosAsignados)],
-    [CONTROL_ADM_COLS.factura, toBool_(request.pagado)],
+    [CONTROL_ADM_COLS.facturaSolicitada, toBool_(request.pagado)],
     [CONTROL_ADM_COLS.marca, brandName],
     [CONTROL_ADM_COLS.razon, normalizeReason_(request.razon)],
     [CONTROL_ADM_COLS.descripcion, request.descripcion || ""],
@@ -1016,7 +1017,7 @@ function controlAdmRowToRequest_(source, row, rowNumber, context, system) {
   const vendor = findOrCreateVendor_(providerName || "Sin proveedor");
   const ordenCompra = String(controlAdmCell_(row, CONTROL_ADM_COLS.ordenCompra) || "").trim();
   const amount = parseAmount_(controlAdmCell_(row, CONTROL_ADM_COLS.monto));
-  const paid = toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.factura)) || Boolean(controlAdmCell_(row, CONTROL_ADM_COLS.fechaPago));
+  const paid = toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.facturaSolicitada)) || toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.factura)) || Boolean(controlAdmCell_(row, CONTROL_ADM_COLS.fechaPago));
   const resources = Boolean(ordenCompra) || toBool_(controlAdmCell_(row, CONTROL_ADM_COLS.recursosAsignados));
   const appId = String(row[system.APP_ID - 1] || "").trim();
   const id = appId || stableImportId_(source.getName(), rowNumber, brand.id, descripcion, ordenCompra);
@@ -1055,7 +1056,7 @@ function genericSourceRowToRequest_(source, headers, row, rowNumber, context) {
   const ordenCompra = String(sourceValue_(headers, row, ["odc", "oc", "orden de compra", "orden compra", "ordenes de compra"]) || "").trim();
   const amount = parseAmount_(sourceValue_(headers, row, ["monto $", "monto", "importe", "presupuesto solicitado"]));
   const resources = Boolean(ordenCompra) || toBool_(sourceValue_(headers, row, ["recursos asignados", "recursos", "asignado"]));
-  const paid = toBool_(sourceValue_(headers, row, ["pagado", "factura", "facturado"]));
+  const paid = toBool_(sourceValue_(headers, row, ["factura solicitada", "fact. solicitada", "pagado", "factura", "facturado"]));
   return normalizeBusinessState_({
     id: stableImportId_(source.getName(), rowNumber, brand.id, descripcion, ordenCompra),
     marcaId: brand.id,

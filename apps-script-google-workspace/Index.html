@@ -226,7 +226,7 @@
         padding: 12px;
       }
       .check-item input { width: auto; min-height: 0; }
-      .date-filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .date-filters { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
       .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
       .error {
         border: 1px solid #ffc8ce;
@@ -315,8 +315,8 @@
         <section id="errorBox" class="error hidden"></section>
 
         <section class="metrics">
-          <article class="metric"><span>Solicitudes pendientes</span><strong id="statCount">0</strong></article>
-          <article class="metric"><span>Monto pendiente por pagar</span><strong id="statRequested">$0</strong></article>
+          <article class="metric"><span>Solicitudes sin ODC</span><strong id="statCount">0</strong></article>
+          <article class="metric"><span>Monto pendiente</span><strong id="statRequested">$0</strong></article>
           <article class="metric"><span>Solicitudes totales</span><strong id="statAssigned">0</strong></article>
           <article class="metric"><span>Monto total general</span><strong id="statPending">$0</strong></article>
         </section>
@@ -324,9 +324,7 @@
         <section class="filters">
           <input id="searchInput" type="search" placeholder="Buscar descripcion, proveedor, marca o responsable">
           <select id="statusFilter">
-            <option value="">Todos los estados</option>
-            <option>Pendiente</option>
-            <option>Pagada</option>
+            <option value="">Todos los filtros</option>
           </select>
         </section>
 
@@ -347,14 +345,12 @@
               <thead>
                 <tr>
                   <th>Marca</th>
-                  <th>Razon</th>
                   <th>Descripcion</th>
                   <th>Responsable</th>
                   <th>Fecha</th>
                   <th>Proveedor</th>
                   <th>ODC</th>
                   <th>Monto</th>
-                  <th>Estado / pago</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -363,7 +359,7 @@
           </div>
         </section>
 
-        <section class="table-card">
+        <section class="table-card" id="vendorSection">
           <div class="table-head">
             <div class="table-title">
               <h2>Contactos proveedores</h2>
@@ -384,14 +380,14 @@
         <input type="hidden" id="requestId">
         <div class="form-grid">
           <label>Marca<select id="requestBrand" required></select></label>
-          <label>Razon<select id="requestReason" required><option>pcv</option><option>efe</option><option>cp</option><option>apc</option></select></label>
+          <label>Razon<select id="requestReason" required><option value="pcv">PCV</option><option value="efe">EFE</option><option value="cp">CP</option><option value="apc">APC</option></select></label>
           <label>Descripcion<input id="requestDescription" required></label>
           <label>Responsable<input id="requestOwner" required></label>
           <label>Fecha<input id="requestDate" type="date" required></label>
           <label>Proveedor<select id="requestVendor" required></select></label>
           <label>ODC / Orden de compra<input id="requestOrder"></label>
           <label>Monto<input id="requestAmount" type="number" step="0.01" min="0" required></label>
-          <label class="check"><input id="requestPaid" type="checkbox"> Paga</label>
+          <label class="check"><input id="requestPaid" type="checkbox"> Factura solicitada</label>
         </div>
         <label>Detalle<textarea id="requestDetail" rows="3"></textarea></label>
         <div class="modal-actions">
@@ -423,8 +419,10 @@
           <button type="button" class="icon" data-close>&times;</button>
         </div>
         <div class="choice-list">
-          <button type="button" class="ghost" data-sort="amount">Monto: mayor a menor</button>
+          <button type="button" class="ghost" data-sort="amount-desc">Monto: mayor a menor</button>
+          <button type="button" class="ghost" data-sort="amount-asc">Monto: menor a mayor</button>
           <button type="button" class="ghost" data-sort="recent">Mas reciente</button>
+          <button type="button" class="ghost" data-sort="month">Mes</button>
           <button type="button" class="ghost" data-sort="reason">Razon</button>
         </div>
       </section>
@@ -436,18 +434,14 @@
           <h2>Exportar solicitudes</h2>
           <button type="button" class="icon" data-close>&times;</button>
         </div>
-        <p class="muted">Elige marcas y fecha para descargar un CSV compatible con Excel.</p>
+        <p class="muted">Se exportan las solicitudes visibles segun el filtro actual y el rango de fechas.</p>
         <div class="date-filters">
-          <label>Dia especifico<input id="exportDay" type="date"></label>
           <label>Desde<input id="exportFrom" type="date"></label>
           <label>Hasta<input id="exportTo" type="date"></label>
         </div>
         <div class="export-tools">
-          <button type="button" class="ghost" id="selectAllBrands">Seleccionar todo</button>
-          <button type="button" class="ghost" id="clearAllBrands">Limpiar marcas</button>
           <button type="button" class="ghost" id="clearExportDates">Limpiar fechas</button>
         </div>
-        <div id="exportBrandList" class="check-list"></div>
         <div class="modal-actions">
           <button type="button" class="ghost" data-close>Cancelar</button>
           <button type="button" class="primary" id="downloadCsvBtn">Descargar CSV</button>
@@ -511,6 +505,10 @@
       }
 
       function reasonLabel(value) {
+        return reasonValue(value).toUpperCase();
+      }
+
+      function reasonValue(value) {
         const reason = String(value || "").trim().toLowerCase();
         return reason === "opc" ? "apc" : reason;
       }
@@ -520,11 +518,35 @@
       }
 
       function requestStateLabel(request) {
-        return hasOrder(request) ? "Pagada" : "Pendiente";
+        if (!hasOrder(request)) return "Sin orden de compra";
+        return request?.pagado ? "Factura solicitada" : "Con orden de compra";
       }
 
       function paymentText(request) {
-        return request?.pagado ? "Paga" : "No paga";
+        return request?.pagado ? "Factura solicitada" : "Sin factura solicitada";
+      }
+
+      function renderStatusOptions() {
+        const options = [
+          ["", "Todos los filtros"],
+          ["sin-odc", "Sin orden de compra"],
+          ["con-odc", "Con orden de compra"],
+        ];
+        if (state.data?.user?.role === "admin") options.push(["factura-solicitada", "Factura solicitada"]);
+        $("statusFilter").innerHTML = options.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+        if (!options.some(([value]) => value === state.status)) state.status = "";
+        $("statusFilter").value = state.status;
+      }
+
+      function matchesStatus(request, status) {
+        if (!status) return true;
+        if (status === "sin-odc") return !hasOrder(request);
+        if (status === "con-odc") {
+          if (state.data?.user?.role === "admin") return hasOrder(request) && !request.pagado;
+          return hasOrder(request);
+        }
+        if (status === "factura-solicitada") return hasOrder(request) && Boolean(request.pagado);
+        return true;
       }
 
       async function load() {
@@ -561,7 +583,7 @@
 
       function visibleRequests() {
         let rows = scopedRequests();
-        if (state.status) rows = rows.filter((r) => requestStateLabel(r) === state.status);
+        if (state.status) rows = rows.filter((r) => matchesStatus(r, state.status));
         if (state.search) {
           const needle = state.search.toLowerCase();
           rows = rows.filter((r) => [
@@ -576,8 +598,10 @@
             vendorName(r.proveedorId),
           ].join(" ").toLowerCase().includes(needle));
         }
-        if (state.sort === "amount") rows.sort((a, b) => Number(b.monto || 0) - Number(a.monto || 0));
+        if (state.sort === "amount-desc") rows.sort((a, b) => Number(b.monto || 0) - Number(a.monto || 0));
+        if (state.sort === "amount-asc") rows.sort((a, b) => Number(a.monto || 0) - Number(b.monto || 0));
         if (state.sort === "recent") rows.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+        if (state.sort === "month") rows.sort((a, b) => String(a.fecha || "").slice(0, 7).localeCompare(String(b.fecha || "").slice(0, 7)) || String(a.fecha || "").localeCompare(String(b.fecha || "")));
         if (state.sort === "reason") rows.sort((a, b) => reasonLabel(a.razon).localeCompare(reasonLabel(b.razon), "es", { sensitivity: "base" }));
         return rows;
       }
@@ -590,6 +614,7 @@
         $("roleTabs").classList.toggle("hidden", user.role !== "admin");
         $("viewerPanel").classList.toggle("hidden", user.role !== "admin");
         document.querySelectorAll(".role-button").forEach((button) => button.classList.toggle("active", button.dataset.view === state.currentView));
+        renderStatusOptions();
         renderViewer();
         renderMetrics();
         renderRequests();
@@ -602,7 +627,7 @@
         if (state.currentView === "admin") {
           select.innerHTML = `<option value="">Todo el sistema</option>`;
           state.viewer = "";
-          $("accessText").textContent = "El administrador ve todas las marcas, solicitudes, proveedores, ODC y pagos.";
+          $("accessText").textContent = "El administrador ve todas las marcas, solicitudes, proveedores, ODC y factura solicitada.";
           return;
         }
         const source = state.currentView === "marca" ? state.data.allBrands : state.data.allVendors;
@@ -619,7 +644,7 @@
           s.totalCount += 1;
           s.totalAmount += amount;
           if (!hasOrder(r)) s.pendingCount += 1;
-          if (!r.pagado) s.pendingAmount += amount;
+          if (!hasOrder(r)) s.pendingAmount += amount;
           return s;
         }, { pendingCount: 0, pendingAmount: 0, totalCount: 0, totalAmount: 0 });
         $("statCount").textContent = stats.pendingCount;
@@ -638,20 +663,14 @@
           return `
             <tr>
               <td><strong>${esc(brandName(r.marcaId))}</strong></td>
-              <td>${esc(reasonLabel(r.razon))}</td>
               <td><strong>${esc(r.descripcion || "")}</strong><div class="sub">${esc(r.detalle || "")}</div></td>
               <td>${esc(r.responsable || "")}</td>
               <td>${esc(String(r.fecha || "").slice(0, 10))}</td>
               <td>${esc(vendorName(r.proveedorId))}</td>
               <td>${processed ? esc(r.ordenCompra) : `<span class="pill bad">Sin ODC</span>`}</td>
               <td><strong>${money(r.monto)}</strong></td>
-              <td>
-                <span class="pill ${processed ? "paid" : "bad"}">${esc(requestStateLabel(r))}</span>
-                ${processed && canEdit
-                  ? `<label class="pay-toggle"><input type="checkbox" data-paid-toggle="${esc(r.id)}" ${r.pagado ? "checked" : ""}> ${esc(paymentText(r))}</label>`
-                  : `<div class="sub">${processed ? esc(paymentText(r)) : "Sin ODC"}</div>`}
-              </td>
               <td><div class="row-actions">
+                ${processed && canEdit ? `<label class="pay-toggle"><input type="checkbox" data-paid-toggle="${esc(r.id)}" ${r.pagado ? "checked" : ""}> ${esc(paymentText(r))}</label>` : ""}
                 ${canEdit ? `<button class="ghost" data-edit="${esc(r.id)}">Editar</button>` : ""}
                 ${canDelete ? `<button class="danger" data-delete-request="${esc(r.id)}" data-delete-name="${esc(r.descripcion || r.id)}">Eliminar</button>` : ""}
               </div></td>
@@ -660,6 +679,9 @@
       }
 
       function renderVendors() {
+        const isBrand = state.data.user.role === "marca";
+        $("vendorSection").classList.toggle("hidden", isBrand);
+        if (isBrand) return;
         const vendors = state.data.vendors || [];
         $("vendorCount").textContent = `${vendors.length} visibles`;
         $("vendorList").innerHTML = vendors.map((v) => `
@@ -705,7 +727,7 @@
         renderRequestOptions();
         $("requestId").value = request.id;
         $("requestBrand").value = request.marcaId;
-        $("requestReason").value = reasonLabel(request.razon);
+        $("requestReason").value = reasonValue(request.razon);
         $("requestDescription").value = request.descripcion;
         $("requestOwner").value = request.responsable;
         $("requestDate").value = String(request.fecha || "").slice(0, 10);
@@ -723,14 +745,14 @@
         const request = {
           id: $("requestId").value,
           marcaId: $("requestBrand").value,
-          razon: reasonLabel($("requestReason").value),
+          razon: reasonValue($("requestReason").value),
           descripcion: $("requestDescription").value,
           responsable: $("requestOwner").value,
           fecha: $("requestDate").value,
           proveedorId: $("requestVendor").value,
           ordenCompra: $("requestOrder").value,
           monto: Number($("requestAmount").value || 0),
-          estado: String($("requestOrder").value || "").trim() ? ($("requestPaid").checked ? "Paga" : "Procesada") : "Pendiente",
+          estado: String($("requestOrder").value || "").trim() ? ($("requestPaid").checked ? "Factura solicitada" : "Con orden de compra") : "Sin orden de compra",
           recursosAsignados: String($("requestOrder").value || "").trim().length > 0,
           pagado: $("requestPaid").checked,
           detalle: $("requestDetail").value,
@@ -744,7 +766,7 @@
       async function setPaidStatus(input) {
         state.data = await callServer("setPaidStatus", input.dataset.paidToggle, input.checked);
         render();
-        showToast(input.checked ? "Solicitud marcada como paga" : "Solicitud marcada como no paga");
+        showToast(input.checked ? "Factura solicitada marcada" : "Factura solicitada desmarcada");
       }
 
       async function deleteRequest(button) {
@@ -763,7 +785,7 @@
             <form class="settings-row" data-kind="brand">
               <input name="id" type="hidden" value="${esc(b.id)}">
               <label>Marca<input name="nombre" value="${esc(b.nombre)}"></label>
-              <label>Razon<input name="razon" value="${esc(b.razon)}"></label>
+              <label>Razon<input name="razon" value="${esc(reasonLabel(b.razon))}"></label>
               <div class="setting-actions"><button class="ghost">Guardar</button><button class="danger" type="button" data-delete-kind="brand" data-delete-id="${esc(b.id)}" data-delete-name="${esc(b.nombre)}">Eliminar</button></div>
             </form>`).join("");
           return `<div class="settings-list">${rows}${newBrandForm()}</div>`;
@@ -794,7 +816,7 @@
       }
 
       function newBrandForm() {
-        return `<form class="settings-row" data-kind="brand-new"><label>Nueva marca<input name="nombre"></label><label>Razon<input name="razon"></label><button class="primary">Agregar</button></form>`;
+        return `<form class="settings-row" data-kind="brand-new"><label>Nueva marca<input name="nombre"></label><label>Razon<input name="razon" placeholder="PCV / APC / CP"></label><button class="primary">Agregar</button></form>`;
       }
 
       function newVendorForm() {
@@ -856,26 +878,14 @@
         showToast(state.data.importSummary || "Cuadro administrativo importado");
       }
 
-      function exportableBrands() {
-        const ids = [...new Set(visibleRequests().map((r) => r.marcaId).filter(Boolean))];
-        return ids.map((id) => ({ id, nombre: brandName(id) })).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
-      }
-
       function openExportDialog() {
-        $("exportDay").value = "";
         $("exportFrom").value = "";
         $("exportTo").value = "";
-        const brands = exportableBrands();
-        $("exportBrandList").innerHTML = brands.length ? brands.map((brand) => `
-          <label class="check-item"><input type="checkbox" value="${esc(brand.id)}" checked><span>${esc(brand.nombre)}</span></label>
-        `).join("") : `<p class="muted">No hay solicitudes visibles para exportar.</p>`;
-        $("downloadCsvBtn").disabled = brands.length === 0;
+        $("downloadCsvBtn").disabled = visibleRequests().length === 0;
         $("exportDialog").showModal();
       }
 
       function exportDateRange() {
-        const day = $("exportDay").value;
-        if (day) return { from: day, to: day };
         return { from: $("exportFrom").value, to: $("exportTo").value };
       }
 
@@ -893,17 +903,15 @@
       }
 
       function downloadCsv() {
-        const selected = new Set([...$("exportBrandList").querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value));
-        if (!selected.size) return showToast("Selecciona al menos una marca");
-        const rows = visibleRequests().filter((request) => selected.has(request.marcaId) && isWithinExportDates(request));
+        const rows = visibleRequests().filter((request) => isWithinExportDates(request));
         if (!rows.length) return showToast("No hay solicitudes para exportar con esos filtros");
-        const headers = ["Marca", "Razon", "Descripcion", "Detalle", "Responsable", "Fecha", "Proveedor", "ODC", "Monto", "Estado", "Pago manual"];
+        const headers = ["Marca", "Razon", "Descripcion", "Responsable", "Fecha", "Proveedor", "ODC", "Monto", "Filtro", "Factura solicitada"];
         const lines = [
           headers.map(csvCell).join(";"),
           ...rows.map((request) => [
-            brandName(request.marcaId), reasonLabel(request.razon), request.descripcion, request.detalle, request.responsable,
+            brandName(request.marcaId), reasonLabel(request.razon), request.descripcion, request.responsable,
             request.fecha, vendorName(request.proveedorId), request.ordenCompra, Number(request.monto || 0), requestStateLabel(request),
-            paymentText(request),
+            request.pagado ? "Si" : "No",
           ].map(csvCell).join(";")),
         ];
         const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" });
@@ -997,23 +1005,11 @@
       $("exportBtn").addEventListener("click", openExportDialog);
       $("importBtn").addEventListener("click", importAdminSheet);
       $("downloadCsvBtn").addEventListener("click", downloadCsv);
-      $("selectAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = true; }));
-      $("clearAllBrands").addEventListener("click", () => $("exportBrandList").querySelectorAll("input").forEach((input) => { input.checked = false; }));
       $("clearExportDates").addEventListener("click", () => {
-        $("exportDay").value = "";
         $("exportFrom").value = "";
         $("exportTo").value = "";
       });
       $("requestOrder").addEventListener("input", syncPaidAvailability);
-      $("exportDay").addEventListener("change", () => {
-        if ($("exportDay").value) {
-          $("exportFrom").value = "";
-          $("exportTo").value = "";
-        }
-      });
-      ["exportFrom", "exportTo"].forEach((id) => $(id).addEventListener("change", () => {
-        if ($(id).value) $("exportDay").value = "";
-      }));
       $("viewerSelect").addEventListener("change", (event) => {
         state.viewer = event.target.value;
         renderMetrics();
