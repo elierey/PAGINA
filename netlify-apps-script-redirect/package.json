@@ -1,0 +1,11 @@
+{
+  "name": "eventos-especiales-redirect",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo Static redirect shell ready"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^3.1.10"
+  }
+}
